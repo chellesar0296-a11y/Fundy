@@ -1,0 +1,203 @@
+@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&family=JetBrains+Mono:wght@400;500;700&display=swap");
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+==========================================================================
+【AI HANDOVER NOTE】
+1. DESIGN PHILOSOPHY:
+   - Atmosphere-First & Emotional Vitality: The 'Funty' design system balances the high-stakes nature of fundraising with a vibrant, approachable energy. It uses 'Soft-Physicality'—UI elements that feel tactile and responsive.
+   - Visual Style: Neo-Bento surfaces with rounded corners (0.75rem) and subtle depth. We use 'Rim-light' effects on primary buttons and glassmorphism (backdrop-blur) for navigation components to maintain a sense of modern transparency and trust.
+   - Target: Bridging the gap between professional financial security and community-driven warmth.
+
+2. TYPOGRAPHY:
+   - Sans (Plus Jakarta Sans): Chosen for its friendly geometric curves and high legibility. It feels modern and energetic, perfect for a brand named 'Funty'. Heavy weights (700-800) are reserved for impact metrics and headers.
+   - Mono (JetBrains Mono): Used exclusively for 'Live Counters', fundraising goals, and financial data points to provide a technical, precise contrast to the friendly UI.
+
+3. COLOR SYSTEM:
+   - Brand Core: A vibrant 'Vibrant Indigo' (Hue 262) serves as the primary anchor for trust. It is paired with an 'Energetic Rose' (Hue 15) for urgency and action-oriented buttons.
+   - Semantic Mapping: --primary uses the brand indigo. --accent uses a softer variation to highlight interactive states. --destructive uses a high-chroma orange-red to signal urgency without being overly aggressive.
+   - Chart Logic: Sequential colors starting from the brand indigo, moving through emerald (growth) and amber (warning) to represent diverse campaign categories.
+
+4. USAGE GUIDE:
+   - Layout: Mixed layout—Centered container for storytelling pages, and a full-width Bento grid for the donor dashboard.
+   - Interactive Rules: All buttons must have a 200ms spring transition. Progress bars should use the --chart-2 (Emerald) to symbolize growth and positive impact.
+   - Surface Treatment: Use 'bg-card' with a 1px border of 'border' for campaign cards to ensure clear separation on both light and dark backgrounds.
+==========================================================================
+*/
+
+:root {
+  /* Typography */
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  
+  /* Radius */
+  --radius: 0.75rem;
+
+  /* Core UI Tokens */
+  --background: oklch(0.99 0.005 260);
+  --foreground: oklch(0.18 0.02 260);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.18 0.02 260);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.18 0.02 260);
+  --primary: oklch(0.58 0.22 262);
+  --primary-foreground: oklch(0.98 0.01 262);
+  --secondary: oklch(0.96 0.02 262);
+  --secondary-foreground: oklch(0.35 0.12 262);
+  --muted: oklch(0.96 0.01 260);
+  --muted-foreground: oklch(0.52 0.03 260);
+  --accent: oklch(0.94 0.04 262);
+  --accent-foreground: oklch(0.45 0.18 262);
+  --destructive: oklch(0.62 0.21 28);
+  --destructive-foreground: oklch(0.98 0.01 28);
+  --border: oklch(0.91 0.01 260);
+  --input: oklch(0.91 0.01 260);
+  --ring: oklch(0.58 0.22 262);
+  
+  /* Chart Tokens */
+  --chart-1: oklch(0.58 0.22 262);
+  --chart-2: oklch(0.68 0.18 155);
+  --chart-3: oklch(0.62 0.21 28);
+  --chart-4: oklch(0.82 0.16 85);
+  --chart-5: oklch(0.72 0.14 210);
+  
+  /* Sidebar Tokens */
+  --sidebar: oklch(0.98 0.005 260);
+  --sidebar-foreground: oklch(0.25 0.03 260);
+  --sidebar-primary: oklch(0.58 0.22 262);
+  --sidebar-primary-foreground: oklch(0.98 0.01 262);
+  --sidebar-accent: oklch(0.94 0.02 262);
+  --sidebar-accent-foreground: oklch(0.45 0.18 262);
+  --sidebar-border: oklch(0.93 0.01 260);
+  --sidebar-ring: oklch(0.58 0.22 262);
+}
+
+.dark {
+  --background: oklch(0.14 0.02 262);
+  --foreground: oklch(0.94 0.01 262);
+  --card: oklch(0.17 0.03 262);
+  --card-foreground: oklch(0.94 0.01 262);
+  --popover: oklch(0.17 0.03 262);
+  --popover-foreground: oklch(0.94 0.01 262);
+  --primary: oklch(0.68 0.19 262);
+  --primary-foreground: oklch(0.12 0.03 262);
+  --secondary: oklch(0.24 0.04 262);
+  --secondary-foreground: oklch(0.88 0.04 262);
+  --muted: oklch(0.22 0.03 262);
+  --muted-foreground: oklch(0.68 0.03 262);
+  --accent: oklch(0.28 0.06 262);
+  --accent-foreground: oklch(0.92 0.05 262);
+  --destructive: oklch(0.55 0.22 28);
+  --destructive-foreground: oklch(0.98 0.01 28);
+  --border: oklch(0.26 0.03 262);
+  --input: oklch(0.26 0.03 262);
+  --ring: oklch(0.68 0.19 262);
+  
+  /* Chart Tokens */
+  --chart-1: oklch(0.68 0.19 262);
+  --chart-2: oklch(0.72 0.16 155);
+  --chart-3: oklch(0.65 0.20 35);
+  --chart-4: oklch(0.85 0.14 90);
+  --chart-5: oklch(0.75 0.12 215);
+  
+  /* Sidebar Tokens */
+  --sidebar: oklch(0.12 0.02 262);
+  --sidebar-foreground: oklch(0.92 0.01 262);
+  --sidebar-primary: oklch(0.68 0.19 262);
+  --sidebar-primary-foreground: oklch(0.12 0.03 262);
+  --sidebar-accent: oklch(0.24 0.04 262);
+  --sidebar-accent-foreground: oklch(0.92 0.01 262);
+  --sidebar-border: oklch(0.22 0.03 262);
+  --sidebar-ring: oklch(0.68 0.19 262);
+}
+
+@theme inline {
+  /* Shadcn Core Mapping */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* Charts Mapping */
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  /* Sidebar Mapping */
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Typography */
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+
+  /* Radius */
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html {
+    @apply scroll-smooth antialiased;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans min-h-screen;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-semibold tracking-tight;
+  }
+
+  code, pre {
+    @apply font-mono;
+  }
+
+  ::selection {
+    @apply bg-primary/20 text-primary;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-muted-foreground/20 rounded-full hover:bg-muted-foreground/40;
+  }
+}
