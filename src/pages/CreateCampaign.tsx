@@ -16,13 +16,20 @@ import { Separator } from '@/components/ui/separator';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
-  ImageIcon, Loader2, ArrowLeft, Info, ShieldCheck,
+  ImageIcon, Loader2, ArrowLeft, Info, ShieldCheck, ShieldAlert,
   Plus, Trash2, Gift, Coins, Image as NftIcon, Package,
   ChevronDown, ChevronUp, Sparkles,
 } from 'lucide-react';
 
 // ─── Constants ────────────────────────────────────────────────
-const CATEGORIES = ['Medical', 'Education', 'Environment', 'Disaster', 'Community'] as const;
+const CATEGORIES = [
+  // Charitable / cause-based
+  'Medical', 'Education', 'Environment', 'Disaster', 'Community', 'Animals',
+  // Personal / private fundraising
+  'Personal', 'Sports',
+  // Creative & innovation
+  'Creative', 'Technology', 'Business',
+] as const;
 
 const REWARD_TYPE_META: Record<RewardType, { label: string; icon: React.ElementType; desc: string; color: string }> = {
   ERC20:  { label: 'ERC-20 Token', icon: Coins,   desc: 'Distribute fungible tokens (FUNDY Token)',       color: 'text-blue-600 bg-blue-50 border-blue-200' },
@@ -199,14 +206,12 @@ export default function CreateCampaign() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [previewUrl, setPreviewUrl] = useState('');
   const [tiers, setTiers] = useState<RewardTier[]>([
-    emptyTier({ minAmount: 20,  type: 'badge',  name: 'Early Supporter Badge',  description: 'Thank you for being one of the first to back this campaign! Receive an exclusive digital badge.' }),
-    emptyTier({ minAmount: 100, type: 'ERC20',  name: 'FUNDY Token',            description: 'Receive 100 FUNDY tokens usable across the platform ecosystem.', tokenAmount: 100 }),
-    emptyTier({ minAmount: 500, type: 'ERC721', name: 'Pioneer NFT',            description: 'Mint a one-of-a-kind NFT that permanently commemorates your contribution.', quantity: 50 }),
+    emptyTier({ minAmount: 20, type: 'badge', name: 'Supporter Badge', description: 'A digital badge to thank you for backing this campaign.' }),
   ]);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: { title: '', short_description: '', description: '', category: 'Education', goal_amount: 5000, end_date: '', image_url: '' },
+    defaultValues: { title: '', short_description: '', description: '', category: 'Personal', goal_amount: 5000, end_date: '', image_url: '' },
   });
 
   const addTier = () => setTiers((p) => [...p, emptyTier()]);
@@ -280,6 +285,20 @@ export default function CreateCampaign() {
             <p className="text-muted-foreground text-lg max-w-2xl">
               Tell the world about your cause — and set up on-chain rewards to automatically thank every donor.
             </p>
+            {user && !user.isVerified && (
+              <div className="mt-4 flex items-center justify-between gap-4 p-4 bg-primary/5 border border-primary/20 rounded-xl">
+                <div className="flex items-center gap-3">
+                  <ShieldAlert className="w-5 h-5 text-primary shrink-0" />
+                  <div>
+                    <p className="font-semibold text-sm">Verified organizers raise 3× more</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">A verified badge on your campaign builds donor confidence and increases contributions.</p>
+                  </div>
+                </div>
+                <Button size="sm" variant="outline" className="shrink-0" onClick={() => navigate('/verify')}>
+                  Get Verified
+                </Button>
+              </div>
+            )}
           </div>
 
           <Form {...form}>

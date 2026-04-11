@@ -17,6 +17,8 @@ import {
   Coins,
   Image,
   Clock,
+  ShieldAlert,
+  CheckCircle2,
 } from 'lucide-react';
 import { ROUTE_PATHS } from '@/lib/index';
 import { useLanguage } from '@/hooks/useLanguage';
@@ -173,6 +175,40 @@ export default function Dashboard() {
           </div>
         </header>
 
+        {/* Verification Banner */}
+        {user.verificationStatus === 'none' && (
+          <div className="mb-6 flex items-center justify-between gap-4 p-4 bg-primary/5 border border-primary/20 rounded-xl">
+            <div className="flex items-center gap-3">
+              <ShieldAlert className="w-5 h-5 text-primary shrink-0" />
+              <div>
+                <p className="font-semibold text-sm">Get Verified to Build Donor Trust</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Verified organizers display a badge on their campaigns and are more likely to receive donations.</p>
+              </div>
+            </div>
+            <Button size="sm" variant="outline" className="shrink-0" onClick={() => navigate('/verify')}>
+              Apply Now
+            </Button>
+          </div>
+        )}
+        {user.verificationStatus === 'pending' && (
+          <div className="mb-6 flex items-center gap-4 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+            <Clock className="w-5 h-5 text-amber-600 shrink-0" />
+            <div>
+              <p className="font-semibold text-sm text-amber-800">Verification Under Review</p>
+              <p className="text-xs text-amber-700 mt-0.5">Your verification request has been submitted and is being reviewed by our team. This usually takes 1–3 business days.</p>
+            </div>
+          </div>
+        )}
+        {user.verificationStatus === 'approved' && (
+          <div className="mb-6 flex items-center gap-4 p-4 bg-emerald-50 border border-emerald-200 rounded-xl">
+            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+            <div>
+              <p className="font-semibold text-sm text-emerald-800">Account Verified</p>
+              <p className="text-xs text-emerald-700 mt-0.5">Your identity has been verified. A verified badge is displayed on your profile and campaigns.</p>
+            </div>
+          </div>
+        )}
+
         {/* Stats Grid */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
           <StatsCard
@@ -233,7 +269,7 @@ export default function Dashboard() {
                     </Link>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {campaigns.slice(0, 2).map((campaign) => (
+                    {campaigns.filter(c => c.organizer.id !== user.id).slice(0, 2).map((campaign) => (
                       <CampaignCard key={campaign.id} campaign={campaign} />
                     ))}
                   </div>
@@ -433,40 +469,32 @@ export default function Dashboard() {
                               </div>
                             </div>
                             
-                            {/* Action Buttons - Updated with Manage and Edit */}
+                            {/* Action Buttons */}
                             <div className="flex gap-2 pt-1">
                               <Button variant="outline" size="sm" className="flex-1 text-xs" asChild>
                                 <Link to={`/campaign/${campaign.id}`}>View</Link>
                               </Button>
-                              <Button 
-                                variant="outline" 
-                                size="sm" 
+                              <Button
+                                variant="outline"
+                                size="sm"
                                 className="flex-1 text-xs"
                                 onClick={() => navigate(`/campaign/${campaign.id}/manage`)}
                               >
                                 <Settings className="w-3 h-3 mr-1" /> Manage
                               </Button>
                             </div>
-                            <div className="flex gap-2">
-                              <Button 
-                                variant="ghost" 
-                                size="sm" 
-                                className="flex-1 text-xs text-muted-foreground"
-                                onClick={() => navigate(`/campaign/${campaign.id}/edit`)}
-                              >
-                                Edit Campaign
-                              </Button>
-                              {campaign.status === 'active' && (
-                                <Button 
-                                  variant="ghost" 
-                                  size="sm" 
-                                  className="text-destructive hover:text-destructive text-xs"
+                            {campaign.status === 'active' && (
+                              <div className="flex gap-2">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="flex-1 text-destructive hover:text-destructive text-xs"
                                   onClick={() => {/* Cancel campaign logic */}}
                                 >
-                                  Cancel
+                                  Cancel Campaign
                                 </Button>
-                              )}
-                            </div>
+                              </div>
+                            )}
                           </CardContent>
                         </Card>
                       );

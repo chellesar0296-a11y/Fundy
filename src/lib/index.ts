@@ -25,7 +25,8 @@ export interface Campaign {
   slug: string;
   description: string;
   shortDescription: string;
-  category: 'Medical' | 'Education' | 'Environment' | 'Disaster' | 'Community';
+  category: 'Medical' | 'Education' | 'Environment' | 'Disaster' | 'Community'
+    | 'Personal' | 'Creative' | 'Technology' | 'Business' | 'Animals' | 'Sports';
   goalAmount: number;
   currentAmount: number;
   donorCount: number;

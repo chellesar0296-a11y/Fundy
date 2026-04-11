@@ -19,15 +19,20 @@ import {
   Megaphone,
   Gift,
   MessageCircle,
-  Settings,
-  Users,
   TrendingUp,
   Send,
   ImagePlus,
   Trash2,
   Edit,
+  Save,
+  Info,
 } from 'lucide-react';
-import { createCampaignUpdate, cancelCampaign, getCampaignUpdates } from '@/lib/supabase';
+import {
+  createCampaignUpdate,
+  cancelCampaign,
+  getCampaignUpdates,
+  updateCampaign,
+} from '@/lib/supabase';
 
 export default function CampaignManage() {
   const { id } = useParams();
@@ -35,10 +40,21 @@ export default function CampaignManage() {
   const { user } = useAuth();
   const { campaign, isLoading, rewardTiers } = useCampaign(id ?? '');
   const [activeTab, setActiveTab] = useState('overview');
+
+  // Update post state
   const [updateTitle, setUpdateTitle] = useState('');
   const [updateContent, setUpdateContent] = useState('');
   const [isPostingUpdate, setIsPostingUpdate] = useState(false);
-  const [updates, setUpdates] = useState([]);
+  const [updates, setUpdates] = useState<any[]>([]);
+
+  // Edit campaign state
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [editTitle, setEditTitle] = useState('');
+  const [editShortDesc, setEditShortDesc] = useState('');
+  const [editDesc, setEditDesc] = useState('');
+  const [editEndDate, setEditEndDate] = useState('');
+  const [editImageUrl, setEditImageUrl] = useState('');
 
   // Load updates
   React.useEffect(() => {
@@ -46,6 +62,17 @@ export default function CampaignManage() {
       getCampaignUpdates(id).then(setUpdates).catch(console.error);
     }
   }, [id]);
+
+  // Pre-fill edit fields when campaign loads
+  React.useEffect(() => {
+    if (campaign) {
+      setEditTitle(campaign.title);
+      setEditShortDesc(campaign.shortDescription);
+      setEditDesc(campaign.description);
+      setEditEndDate(campaign.endDate ? campaign.endDate.split('T')[0] : '');
+      setEditImageUrl(campaign.image ?? '');
+    }
+  }, [campaign?.id]);
 
   // Check if user is the organizer
   const isOrganizer = campaign?.organizer.id === user?.id;
@@ -87,13 +114,35 @@ export default function CampaignManage() {
       toast.success('Update posted successfully!');
       setUpdateTitle('');
       setUpdateContent('');
-      // Refresh updates
       const newUpdates = await getCampaignUpdates(id!);
       setUpdates(newUpdates);
     } catch (error) {
       toast.error('Failed to post update');
     } finally {
       setIsPostingUpdate(false);
+    }
+  };
+
+  const handleSaveCampaign = async () => {
+    if (!editTitle.trim()) {
+      toast.error('Title cannot be empty');
+      return;
+    }
+    setIsSaving(true);
+    try {
+      await updateCampaign(id!, {
+        title: editTitle.trim(),
+        short_description: editShortDesc.trim(),
+        description: editDesc.trim(),
+        end_date: editEndDate ? new Date(editEndDate).toISOString() : undefined,
+        image_url: editImageUrl.trim() || null,
+      });
+      toast.success('Campaign updated successfully!');
+      setIsEditMode(false);
+    } catch (err: any) {
+      toast.error(err.message ?? 'Failed to save changes');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -193,7 +242,7 @@ export default function CampaignManage() {
               </TabsTrigger>
             </TabsList>
 
-            {/* Overview Tab */}
+            {/* Overview Tab — performance + edit fields */}
             <TabsContent value="overview" className="space-y-6">
               <Card>
                 <CardHeader>
@@ -211,6 +260,99 @@ export default function CampaignManage() {
                       <p className="text-xs text-muted-foreground">Updates Posted</p>
                     </div>
                   </div>
+                </CardContent>
+              </Card>
+
+              {/* Edit campaign details */}
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between">
+                  <div>
+                    <CardTitle>Campaign Details</CardTitle>
+                    <CardDescription>Edit your campaign's information</CardDescription>
+                  </div>
+                  {!isEditMode ? (
+                    <Button variant="outline" size="sm" onClick={() => setIsEditMode(true)}>
+                      <Edit className="w-3 h-3 mr-2" /> Edit
+                    </Button>
+                  ) : (
+                    <div className="flex gap-2">
+                      <Button variant="ghost" size="sm" onClick={() => setIsEditMode(false)}>
+                        Cancel
+                      </Button>
+                      <Button size="sm" onClick={handleSaveCampaign} disabled={isSaving}>
+                        {isSaving ? <Loader2 className="w-3 h-3 animate-spin mr-2" /> : <Save className="w-3 h-3 mr-2" />}
+                        Save
+                      </Button>
+                    </div>
+                  )}
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {!isEditMode ? (
+                    <>
+                      <div>
+                        <p className="text-xs text-muted-foreground mb-1">Title</p>
+                        <p className="font-medium">{campaign.title}</p>
+                      </div>
+                      <Separator />
+                      <div>
+                        <p className="text-xs text-muted-foreground mb-1">Short Description</p>
+                        <p className="text-sm">{campaign.shortDescription}</p>
+                      </div>
+                      <Separator />
+                      <div>
+                        <p className="text-xs text-muted-foreground mb-1">End Date</p>
+                        <p className="text-sm">{new Date(campaign.endDate).toLocaleDateString()}</p>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="space-y-2">
+                        <Label>Campaign Title</Label>
+                        <Input
+                          value={editTitle}
+                          onChange={(e) => setEditTitle(e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Short Description</Label>
+                        <Input
+                          value={editShortDesc}
+                          onChange={(e) => setEditShortDesc(e.target.value)}
+                          placeholder="A short summary of your campaign"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Full Description</Label>
+                        <Textarea
+                          value={editDesc}
+                          onChange={(e) => setEditDesc(e.target.value)}
+                          rows={6}
+                        />
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label>End Date</Label>
+                          <Input
+                            type="date"
+                            value={editEndDate}
+                            onChange={(e) => setEditEndDate(e.target.value)}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Campaign Image URL</Label>
+                          <Input
+                            value={editImageUrl}
+                            onChange={(e) => setEditImageUrl(e.target.value)}
+                            placeholder="https://..."
+                          />
+                        </div>
+                      </div>
+                      <div className="flex items-start gap-2 p-3 bg-muted/40 rounded-lg text-xs text-muted-foreground">
+                        <Info className="w-4 h-4 shrink-0 mt-0.5" />
+                        The goal amount and reward tiers cannot be modified after creation to protect your backers.
+                      </div>
+                    </>
+                  )}
                 </CardContent>
               </Card>
 
@@ -294,9 +436,6 @@ export default function CampaignManage() {
                               {new Date(update.created_at).toLocaleDateString()} at {new Date(update.created_at).toLocaleTimeString()}
                             </p>
                           </div>
-                          <Button variant="ghost" size="sm">
-                            <Edit className="w-3 h-3" />
-                          </Button>
                         </div>
                         <p className="text-sm mt-2 whitespace-pre-wrap">{update.content}</p>
                       </div>
@@ -306,27 +445,32 @@ export default function CampaignManage() {
               )}
             </TabsContent>
 
-            {/* Rewards Tab */}
+            {/* Rewards Tab — read-only */}
             <TabsContent value="rewards" className="space-y-6">
+              <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+                <Info className="w-5 h-5 shrink-0 mt-0.5 text-amber-600" />
+                <div>
+                  <p className="font-semibold">Reward tiers are locked after campaign creation</p>
+                  <p className="mt-0.5 text-amber-700">To protect your backers' rights, reward tiers cannot be edited or removed once the campaign is live. You may add new tiers if desired — contact support to do so.</p>
+                </div>
+              </div>
               <Card>
                 <CardHeader>
                   <CardTitle>Reward Tiers</CardTitle>
-                  <CardDescription>Manage the rewards offered to your supporters</CardDescription>
+                  <CardDescription>Your campaign's current reward structure</CardDescription>
                 </CardHeader>
                 <CardContent>
                   {rewardTiers && rewardTiers.length > 0 ? (
                     <div className="space-y-3">
                       {rewardTiers.map((tier: any) => (
-                        <div key={tier.id} className="border rounded-lg p-4">
+                        <div key={tier.id} className="border rounded-lg p-4 bg-muted/20">
                           <div className="flex justify-between items-start">
                             <div>
                               <p className="font-semibold">{tier.name}</p>
                               <p className="text-sm text-muted-foreground">Minimum RM{tier.minAmount}</p>
                               <p className="text-sm mt-1">{tier.description}</p>
                             </div>
-                            <Button variant="ghost" size="sm">
-                              <Edit className="w-3 h-3" />
-                            </Button>
+                            <Badge variant="outline" className="shrink-0">{tier.type}</Badge>
                           </div>
                         </div>
                       ))}

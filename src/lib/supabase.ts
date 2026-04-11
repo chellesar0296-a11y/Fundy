@@ -25,6 +25,9 @@ export interface DbProfile {
   avatar_url: string | null;
   bio: string | null;
   role: 'admin' | 'donor' | 'organizer';
+  // Verification fields (add these columns to your Supabase profiles table)
+  is_verified: boolean | null;
+  verification_status: 'none' | 'pending' | 'approved' | 'rejected' | null;
   created_at: string;
 }
 
@@ -56,6 +59,24 @@ export interface DbDonation {
   is_anonymous: boolean;
   created_at: string;
   campaigns?: DbCampaign;
+}
+
+// ── Verification request type ─────────────────────────────────
+
+export interface DbVerificationRequest {
+  id: string;
+  user_id: string;
+  full_name: string;
+  id_type: string;
+  id_number: string;
+  document_url: string | null;
+  selfie_url: string | null;
+  notes: string | null;
+  status: 'pending' | 'approved' | 'rejected';
+  admin_note: string | null;
+  created_at: string;
+  updated_at: string | null;
+  profiles?: DbProfile;
 }
 
 // ── Campaign helpers ──────────────────────────────────────────
@@ -230,16 +251,6 @@ export async function getCampaignUpdates(campaignId: string) {
   return data;
 }
 
-export async function cancelCampaign(campaignId: string) {
-  const { error } = await supabase
-    .from('campaigns')
-    .update({ status: 'cancelled', updated_at: new Date().toISOString() })
-    .eq('id', campaignId);
-  
-  if (error) throw error;
-}
-
-
 export async function updateCampaign(
   campaignId: string,
   updates: {
@@ -264,4 +275,187 @@ export async function updateCampaign(
 
   if (error) throw error;
   return data;
+}
+
+// ── Verification helpers ──────────────────────────────────────
+
+export async function submitVerificationRequest(request: {
+  user_id: string;
+  full_name: string;
+  id_type: string;
+  id_number: string;
+  document_url?: string | null;
+  selfie_url?: string | null;
+  notes?: string | null;
+}) {
+  const { data, error } = await supabase
+    .from('verification_requests')
+    .insert({
+      ...request,
+      status: 'pending',
+      created_at: new Date().toISOString(),
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  return data as DbVerificationRequest;
+}
+
+export async function fetchVerificationRequests() {
+  const { data, error } = await supabase
+    .from('verification_requests')
+    .select('*, profiles(name, email, avatar_url)')
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return data as DbVerificationRequest[];
+}
+
+export async function fetchUserVerificationRequest(userId: string) {
+  const { data, error } = await supabase
+    .from('verification_requests')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data as DbVerificationRequest | null;
+}
+
+export async function processVerificationRequest(
+  requestId: string,
+  action: 'approved' | 'rejected',
+  adminNote?: string,
+  userId?: string,
+) {
+  // Update the request status
+  const { error: reqError } = await supabase
+    .from('verification_requests')
+    .update({
+      status: action,
+      admin_note: adminNote ?? null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', requestId);
+  if (reqError) throw reqError;
+
+  // If approved, update the profile is_verified flag
+  if (action === 'approved' && userId) {
+    const { error: profileError } = await supabase
+      .from('profiles')
+      .update({
+        is_verified: true,
+        verification_status: 'approved',
+      })
+      .eq('id', userId);
+    if (profileError) throw profileError;
+  } else if (action === 'rejected' && userId) {
+    const { error: profileError } = await supabase
+      .from('profiles')
+      .update({
+        verification_status: 'rejected',
+      })
+      .eq('id', userId);
+    if (profileError) throw profileError;
+  }
+}
+
+// ── Report helpers ────────────────────────────────────────────
+
+export interface DbReport {
+  id: string;
+  campaign_id: string;
+  reporter_id: string | null;
+  reason_type: 'spam' | 'fraud' | 'inappropriate' | 'other';
+  reason_detail: string | null;
+  status: 'pending' | 'reviewed' | 'dismissed';
+  created_at: string;
+  campaigns?: DbCampaign;
+  profiles?: DbProfile;
+}
+
+export async function submitReport(report: {
+  campaign_id: string;
+  reporter_id?: string | null;
+  reason_type: DbReport['reason_type'];
+  reason_detail?: string | null;
+}) {
+  const { data, error } = await supabase
+    .from('reports')
+    .insert({ ...report, status: 'pending', created_at: new Date().toISOString() })
+    .select()
+    .single();
+  if (error) throw error;
+  return data as DbReport;
+}
+
+export async function fetchReports() {
+  const { data, error } = await supabase
+    .from('reports')
+    .select('*, campaigns(title, organizer_id), profiles:reporter_id(name, email)')
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return data as DbReport[];
+}
+
+export async function updateReportStatus(reportId: string, status: DbReport['status']) {
+  const { error } = await supabase
+    .from('reports')
+    .update({ status })
+    .eq('id', reportId);
+  if (error) throw error;
+}
+
+
+
+export async function cancelCampaign(campaignId: string) {
+  const { error } = await supabase
+    .from('campaigns')
+    .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+    .eq('id', campaignId);
+  
+  if (error) throw error;
+}
+
+// ── Cancel campaign with reason + email ───────────────────────
+
+export async function cancelCampaignWithReason(
+  campaignId: string,
+  reason: string,
+  organizerEmail: string,
+  campaignTitle: string,
+) {
+  
+  // 1. Update campaign status
+  
+  const { error } = await supabase
+    .from('campaigns')
+    .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+    .eq('id', campaignId);
+  if (error) throw error;
+
+  // 2. Send email via Supabase Edge Function
+  try {
+    await supabase.functions.invoke('send-email', {
+      body: {
+        to: organizerEmail,
+        subject: `Your campaign "${campaignTitle}" has been cancelled`,
+        html: `
+          <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
+            <h2 style="color:#ef4444">Campaign Cancelled</h2>
+            <p>Hi,</p>
+            <p>Your campaign <strong>"${campaignTitle}"</strong> has been reviewed by our team and has been cancelled for the following reason:</p>
+            <blockquote style="border-left:4px solid #ef4444;padding:12px 16px;background:#fef2f2;border-radius:4px;margin:16px 0">
+              ${reason}
+            </blockquote>
+            <p>If you believe this was a mistake, please contact our support team.</p>
+            <p style="color:#6b7280;font-size:14px">— The Fundy Team</p>
+          </div>
+        `,
+      },
+    });
+  } catch (emailErr) {
+    // Email failure should not block the cancel action
+    console.error('[send-email] failed:', emailErr);
+  }
 }

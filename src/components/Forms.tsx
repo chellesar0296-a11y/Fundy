@@ -37,6 +37,9 @@ export function DonationForm({ campaign, onClose }: { campaign: Campaign; onClos
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedPreset, setSelectedPreset] = useState<number | null>(null);
 
+  // Block organizer from donating to own campaign
+  const isOwnCampaign = !!user && user.id === campaign.organizer.id;
+
   const form = useForm<z.infer<typeof donationSchema>>({
     resolver: zodResolver(donationSchema),
     defaultValues: {
@@ -72,6 +75,20 @@ export function DonationForm({ campaign, onClose }: { campaign: Campaign; onClos
     setSelectedPreset(amount);
     form.setValue('amount', amount);
   };
+
+  if (isOwnCampaign) {
+    return (
+      <div className="w-full max-w-lg p-6 text-center space-y-3">
+        <div className="inline-flex p-4 bg-amber-100 rounded-full">
+          <span className="text-2xl">🚫</span>
+        </div>
+        <p className="font-semibold text-lg">You can't donate to your own campaign</p>
+        <p className="text-sm text-muted-foreground">
+          As the organizer of this campaign, you are not able to make donations to it.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <motion.div

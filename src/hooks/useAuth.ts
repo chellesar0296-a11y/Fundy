@@ -10,6 +10,9 @@ export interface User {
   role: 'admin' | 'donor' | 'organizer';
   bio?: string;
   createdAt: string;
+  // Verification
+  isVerified: boolean;
+  verificationStatus: 'none' | 'pending' | 'approved' | 'rejected';
 }
 
 function dbProfileToUser(profile: DbProfile): User {
@@ -21,6 +24,8 @@ function dbProfileToUser(profile: DbProfile): User {
     role: profile.role,
     bio: profile.bio ?? undefined,
     createdAt: profile.created_at,
+    isVerified: profile.is_verified ?? false,
+    verificationStatus: profile.verification_status ?? 'none',
   };
 }
 
@@ -61,6 +66,8 @@ export const useAuth = () => {
         avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${supabaseUser.email}`,
         role: 'donor',
         createdAt: supabaseUser.created_at,
+        isVerified: false,
+        verificationStatus: 'none',
       });
     }
   };

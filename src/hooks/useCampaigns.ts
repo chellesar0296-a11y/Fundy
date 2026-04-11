@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { fetchCampaigns, fetchCampaignById, DbCampaign } from '@/lib/supabase';
+import { fetchCampaigns, fetchCampaignById, DbCampaign, supabase } from '@/lib/supabase';
 import { Campaign } from '@/lib/index';
 
 // Map DB row to frontend Campaign type
@@ -20,7 +20,7 @@ export function dbCampaignToFrontend(c: DbCampaign): Campaign {
       id: c.organizer_id ?? 'platform',
       name: c.profiles?.name ?? 'Fundy Platform',
       avatar: c.profiles?.avatar_url ?? undefined,
-      isVerified: true,
+      isVerified: c.profiles?.is_verified ?? false,
     },
     status: c.status,
   };
@@ -48,14 +48,50 @@ export function useCampaign(id: string) {
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [rewardTiers, setRewardTiers] = useState<any[]>([]);
 
   useEffect(() => {
     if (!id) return;
-    fetchCampaignById(id)
-      .then((data) => setCampaign(dbCampaignToFrontend(data)))
-      .catch((err) => setError(err.message))
+
+    setIsLoading(true);
+    setRewardTiers([]);
+
+    // Fetch campaign and reward tiers in parallel
+    Promise.all([
+      fetchCampaignById(id),
+      supabase
+        .from('reward_tiers')
+        .select('*')
+        .eq('campaign_id', id)
+        .order('min_amount', { ascending: true }),
+    ])
+      .then(([campaignData, { data: tiers, error: tiersError }]) => {
+        setCampaign(dbCampaignToFrontend(campaignData));
+
+        if (tiersError) {
+          console.error('[useCampaign] reward_tiers error:', tiersError.message);
+          setRewardTiers([]);
+        } else {
+          setRewardTiers(
+            (tiers ?? []).map((t: any) => ({
+              id: t.id,
+              name: t.name,
+              description: t.description,
+              minAmount: Number(t.min_amount),
+              type: t.type,
+              quantity: t.quantity ?? null,
+              tokenAmount: t.token_amount ?? null,
+              isPhysical: t.is_physical ?? false,
+            })),
+          );
+        }
+      })
+      .catch((err) => {
+        console.error('[useCampaign] error:', err.message);
+        setError(err.message);
+      })
       .finally(() => setIsLoading(false));
   }, [id]);
 
-  return { campaign, isLoading, error };
+  return { campaign, isLoading, error, rewardTiers };
 }

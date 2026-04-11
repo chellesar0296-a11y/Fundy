@@ -1,14 +1,15 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ArrowRight, Globe, Users, TrendingUp, Heart, ShieldCheck, Zap } from 'lucide-react';
+import { ArrowRight, Users, TrendingUp, Heart, Zap } from 'lucide-react';
 import { IMAGES } from '@/assets/images';
 import { ROUTE_PATHS } from '@/lib/index';
 import { useLanguage } from '@/hooks/useLanguage';
-import { mockTestimonials, mockStats } from '@/data/index';
+import { mockStats } from '@/data/index';
 import { useCampaigns } from '@/hooks/useCampaigns';
-import { CampaignCard, TestimonialCard, StatsCard } from '@/components/Cards';
+import { CampaignCard, StatsCard } from '@/components/Cards';
 import { AuthModal } from '@/components/AuthModal';
+import { useAuth } from '@/hooks/useAuth';
 
 const staggerContainer = {
   hidden: { opacity: 0 },
@@ -31,6 +32,7 @@ const fadeInUp = {
 
 export default function Home() {
   const { t } = useLanguage();
+  const { user } = useAuth();
   const { campaigns } = useCampaigns();
   const [searchParams, setSearchParams] = useSearchParams();
   const [authModal, setAuthModal] = React.useState<{ open: boolean; tab: 'login' | 'register' }>({ open: false, tab: 'login' });
@@ -170,63 +172,9 @@ export default function Home() {
             viewport={{ once: true }}
             className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8"
           >
-            {campaigns.slice(0, 3).map((campaign) => (
+            {campaigns.filter(c => !user || c.organizer.id !== user.id).slice(0, 3).map((campaign) => (
               <motion.div key={campaign.id} variants={fadeInUp}>
                 <CampaignCard campaign={campaign} />
-              </motion.div>
-            ))}
-          </motion.div>
-        </div>
-      </section>
-
-      {/* Trust & Transparency Section */}
-      <section className="py-20 bg-primary/5">
-        <div className="container mx-auto px-4">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl font-bold mb-4">Why Choose Fundy?</h2>
-            <p className="text-muted-foreground max-w-2xl mx-auto">
-              We build technology that bridges the gap between generous hearts and meaningful impact.
-            </p>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-12">
-            {[ 
-              { icon: <ShieldCheck size={40} />, title: '100% Secure', desc: 'Bank-grade encryption for all transactions and data protection.' },
-              { icon: <Globe size={40} />, title: 'Global Reach', desc: 'Supporting initiatives across 6 continents and 50+ countries.' },
-              { icon: <Heart size={40} />, title: 'Direct Impact', desc: 'Minimal overhead ensures more of your donation goes to the cause.' }
-            ].map((feature, i) => (
-              <motion.div 
-                key={i} 
-                whileHover={{ y: -5 }}
-                className="flex flex-col items-center text-center p-8 rounded-2xl bg-card border border-border shadow-sm"
-              >
-                <div className="w-20 h-20 rounded-2xl bg-primary/10 text-primary flex items-center justify-center mb-6">
-                  {feature.icon}
-                </div>
-                <h3 className="text-xl font-bold mb-3">{feature.title}</h3>
-                <p className="text-muted-foreground">{feature.desc}</p>
-              </motion.div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Testimonials */}
-      <section className="py-24">
-        <div className="container mx-auto px-4">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl md:text-4xl font-bold mb-4">Voices of Our Community</h2>
-            <p className="text-muted-foreground">Real stories from real people who are changing the world with Fundy.</p>
-          </div>
-          <motion.div
-            variants={staggerContainer}
-            initial="hidden"
-            whileInView="visible"
-            viewport={{ once: true }}
-            className="grid grid-cols-1 md:grid-cols-3 gap-8"
-          >
-            {mockTestimonials.map((testimonial) => (
-              <motion.div key={testimonial.id} variants={fadeInUp}>
-                <TestimonialCard testimonial={{ ...testimonial, rating: 5 }} />
               </motion.div>
             ))}
           </motion.div>

@@ -1,0 +1,4 @@
+# supabase/config.toml
+
+[functions.send-email]
+verify_jwt = false
