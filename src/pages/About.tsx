@@ -9,27 +9,27 @@ import { Button } from "@/components/ui/button";
 
 const teamMembers = [
   {
-    name: "Sarah Jenkins",
+    name: "Lim Tzi She",
     role: "Chief Executive Officer",
-    image: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=400",
+    image: "https://drive.google.com/thumbnail?id=1458hB-y1bkPozceagt-LIzXe1KV6XeJu&sz=w800",
     bio: "Passionate about leveraging technology to democratize philanthropy."
   },
   {
-    name: "David Chen",
+    name: "Farhan Islam Shafin",
     role: "Chief Technology Officer",
-    image: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=400",
+    image: "https://drive.google.com/thumbnail?id=1DxgPEywuwEHtXhFbJX0d23NZ9qsgsDed&sz=w800",
     bio: "Expert in secure distributed systems and fintech innovation."
   },
   {
-    name: "Elena Rodriguez",
+    name: "Fion Tan Xuan Ling",
     role: "Head of Community",
-    image: "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&q=80&w=400",
+    image: "https://drive.google.com/thumbnail?id=1RvGLogABYiUfrJPCX-9AiA77qRxtOqwS&sz=w800",
     bio: "Dedicated to building bridges between donors and global causes."
   },
   {
-    name: "Marcus Thorne",
+    name: "Teh Jyy Jiun",
     role: "Product Design Lead",
-    image: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=400",
+    image: "https://drive.google.com/thumbnail?id=1E62wjC2CiRhmJ5Yge1JCIaMRDTqC5sBv&sz=w800",
     bio: "Architect of the Fundy user experience and visual language."
   }
 ];
