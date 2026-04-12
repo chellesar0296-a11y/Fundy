@@ -5,7 +5,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { toast } from 'sonner';
-import { createCampaign } from '@/lib/supabase';
+import { createCampaign, supabase } from '@/lib/supabase';
 import { useAuth } from '@/hooks/useAuth';
 import { ROUTE_PATHS, RewardType } from '@/lib/index';
 import { Button } from '@/components/ui/button';
@@ -32,9 +32,10 @@ const CATEGORIES = [
 ] as const;
 
 const REWARD_TYPE_META: Record<RewardType, { label: string; icon: React.ElementType; desc: string; color: string }> = {
-  ERC20:  { label: 'ERC-20 Token', icon: Coins,   desc: 'Distribute fungible tokens (FUNDY Token)',       color: 'text-blue-600 bg-blue-50 border-blue-200' },
-  ERC721: { label: 'ERC-721 NFT',  icon: NftIcon,  desc: 'Mint a unique, non-fungible NFT collectible',    color: 'text-violet-600 bg-violet-50 border-violet-200' },
-  badge:  { label: 'Digital Badge', icon: Gift,    desc: 'Off-chain badge, issued automatically on-chain', color: 'text-amber-600 bg-amber-50 border-amber-200' },
+  ERC20:    { label: 'Token Reward',    icon: Coins,    desc: 'Distribute fungible tokens to supporters',        color: 'text-blue-600 bg-blue-50 border-blue-200' },
+  ERC721:   { label: 'NFT Collectible', icon: NftIcon,  desc: 'Mint a unique NFT collectible for each backer',   color: 'text-violet-600 bg-violet-50 border-violet-200' },
+  badge:    { label: 'Badge',           icon: Gift,     desc: 'A digital badge issued automatically on-chain',   color: 'text-amber-600 bg-amber-50 border-amber-200' },
+  physical: { label: 'Physical Item',   icon: Package,  desc: 'A real item you will ship to the supporter',      color: 'text-emerald-600 bg-emerald-50 border-emerald-200' },
 };
 
 // ─── Reward tier type ─────────────────────────────────────────
@@ -46,7 +47,6 @@ interface RewardTier {
   description: string;
   quantity: number | null;
   tokenAmount: number | null;
-  isPhysical: boolean;
 }
 
 function emptyTier(defaults?: Partial<RewardTier>): RewardTier {
@@ -58,7 +58,6 @@ function emptyTier(defaults?: Partial<RewardTier>): RewardTier {
     description: '',
     quantity: null,
     tokenAmount: null,
-    isPhysical: false,
     ...defaults,
   };
 }
@@ -151,7 +150,12 @@ function TierEditor({ tier, index, onUpdate, onRemove }: {
               <div className="space-y-1.5">
                 <Label className="text-xs">Reward name</Label>
                 <Input
-                  placeholder={tier.type === 'ERC721' ? 'e.g. Pioneer Supporter NFT' : tier.type === 'ERC20' ? 'e.g. FUNDY Token Reward' : 'e.g. Early Bird Badge'}
+                  placeholder={
+                    tier.type === 'ERC721' ? 'e.g. Pioneer Supporter NFT'
+                    : tier.type === 'ERC20' ? 'e.g. FUNDY Token Reward'
+                    : tier.type === 'physical' ? 'e.g. Signed Poster, T-Shirt'
+                    : 'e.g. Early Bird Badge'
+                  }
                   value={tier.name} onChange={(e) => set('name', e.target.value)} />
               </div>
 
@@ -179,18 +183,6 @@ function TierEditor({ tier, index, onUpdate, onRemove }: {
                     onChange={(e) => set('quantity', e.target.value ? Number(e.target.value) : null)} />
                 </div>
               </div>
-
-              {/* Physical reward toggle */}
-              <label className="flex items-center gap-3 cursor-pointer select-none">
-                <div onClick={() => set('isPhysical', !tier.isPhysical)}
-                  className={`w-9 h-5 rounded-full transition-colors ${tier.isPhysical ? 'bg-primary' : 'bg-muted'} relative flex-shrink-0`}>
-                  <div className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${tier.isPhysical ? 'translate-x-4' : ''}`} />
-                </div>
-                <div>
-                  <p className="text-sm font-medium flex items-center gap-1.5"><Package className="w-3.5 h-3.5" /> Includes a physical reward</p>
-                  <p className="text-xs text-muted-foreground">This tier will be flagged as "pending shipment" until you manually fulfill it</p>
-                </div>
-              </label>
             </div>
           </motion.div>
         )}
@@ -250,8 +242,28 @@ export default function CreateCampaign() {
         end_date: new Date(values.end_date).toISOString(),
         organizer_id: user.id,
       });
-      // Production: await supabase.from('reward_tiers').insert(tiers.map(t => ({ ...t, campaign_id: campaign.id })));
-      console.log('[Reward tiers]', tiers.map((t) => ({ ...t, campaign_id: campaign.id })));
+
+      // Save reward tiers to database
+      if (tiers.length > 0) {
+        const { error: tiersError } = await supabase
+          .from('reward_tiers')
+          .insert(
+            tiers.map((t) => ({
+              campaign_id: campaign.id,
+              name: t.name,
+              description: t.description,
+              min_amount: t.minAmount,
+              type: t.type,
+              quantity: t.quantity ?? null,
+              token_amount: t.tokenAmount ?? null,
+            })),
+          );
+        if (tiersError) {
+          console.error('[reward_tiers] insert error:', tiersError.message);
+          // Don't block — campaign is created, tiers can be added later
+        }
+      }
+
       toast.success(`Campaign is live! ${tiers.length} reward tier${tiers.length !== 1 ? 's' : ''} configured.`);
       navigate(ROUTE_PATHS.CAMPAIGN_DETAIL.replace(':id', campaign.id));
     } catch (err: any) {

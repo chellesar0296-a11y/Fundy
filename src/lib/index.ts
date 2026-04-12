@@ -233,7 +233,7 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
 };
 
 // ── Reward / NFT types (P4) ───────────────────────────────────
-export type RewardType = 'ERC20' | 'ERC721' | 'badge';
+export type RewardType = 'ERC20' | 'ERC721' | 'badge' | 'physical';
 export type RewardStatus = 'pending' | 'minted' | 'claimed' | 'failed';
 
 export interface Reward {
