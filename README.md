@@ -18,13 +18,10 @@ remain:
 - connect campaign ---> create contract
 - donate function
 - reward function
-- verification problem --> the verified user still show the organizer not verified
 - the all link in the footer of web app
 - cannot donate own campaign
-- do not show own campaign in the dashboard campaign suggestion  
 - media upload in the post update in the campaign management
 - First page a little bit big the things
-- 
 
 can do:  
 - Full function of shipping physical reward (may not do)
