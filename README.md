@@ -14,6 +14,10 @@ It will come out
 updated：  
 Admin Acc is "admin123@gmail.com", password is "admin123"
 
+attention !!!!!  
+I will modify a bit, like create the campaign to chain not the db...!!!!
+
+
 remain:  
 - connect campaign ---> create contract
 - donate function
