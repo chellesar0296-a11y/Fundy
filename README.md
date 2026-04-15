@@ -4,10 +4,13 @@ Fundcrowding Platform Student Work
 
 Use   
 "npm install"  
+"npm install ethers --save"  
 for the first time
 then  
 "npm run dev"   
 to open 
+if still cannot  
+"npm install @metamask/detect-provider"  
 if nothings come out, please reload  
 It will come out 
 
