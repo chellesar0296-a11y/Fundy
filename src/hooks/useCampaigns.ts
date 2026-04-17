@@ -16,6 +16,7 @@ export function dbCampaignToFrontend(c: DbCampaign): Campaign {
     donorCount: c.donor_count,
     image: c.image_url ?? 'https://images.unsplash.com/photo-1593113598332-cd288d649433?auto=format&fit=crop&q=80&w=800',
     endDate: c.end_date,
+    onChainId: c.on_chain_id ?? null,
     organizer: {
       id: c.organizer_id ?? 'platform',
       name: c.profiles?.name ?? 'Fundy Platform',

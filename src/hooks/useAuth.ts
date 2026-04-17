@@ -13,6 +13,8 @@ export interface User {
   // Verification
   isVerified: boolean;
   verificationStatus: 'none' | 'pending' | 'approved' | 'rejected';
+  // Wallet
+  walletAddress?: string | null;
 }
 
 function dbProfileToUser(profile: DbProfile): User {
@@ -24,8 +26,9 @@ function dbProfileToUser(profile: DbProfile): User {
     role: profile.role,
     bio: profile.bio ?? undefined,
     createdAt: profile.created_at,
-    isVerified: profile.is_verified ?? false,
-    verificationStatus: profile.verification_status ?? 'none',
+    isVerified: profile.role === 'admin' ? true : (profile.is_verified ?? false),
+    verificationStatus: profile.role === 'admin' ? 'approved' : (profile.verification_status ?? 'none'),
+    walletAddress: profile.wallet_address ?? null,
   };
 }
 
@@ -71,6 +74,12 @@ export const useAuth = () => {
       });
     }
   };
+
+  // Expose a manual refresh so components can re-fetch after verification status changes
+  const refreshProfile = useCallback(async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.user) await loadProfile(session.user);
+  }, []);
 
   const login = useCallback(async (email: string, password: string) => {
     setIsLoading(true);
@@ -141,6 +150,7 @@ export const useAuth = () => {
     register,
     logout,
     updateProfile: updateUserProfile,
+    refreshProfile,
     clearError: () => setError(null),
   };
 };

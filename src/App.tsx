@@ -5,6 +5,8 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { ROUTE_PATHS } from "@/lib/index";
 import { Layout } from "@/components/Layout";
+import { Web3Provider } from "@/context/Web3Context";
+import { useAuth } from "@/hooks/useAuth";
 import Home from "@/pages/Home";
 import Campaigns from "@/pages/Campaigns";
 import CampaignDetail from "@/pages/CampaignDetail";
@@ -26,6 +28,32 @@ const queryClient = new QueryClient({
   },
 });
 
+// Inner component so we can access useAuth for userId
+function AppWithWeb3() {
+  const { user } = useAuth();
+  return (
+    <Web3Provider userId={user?.id}>
+      <Layout>
+        <Routes>
+          <Route path={ROUTE_PATHS.HOME}            element={<Home />} />
+          <Route path={ROUTE_PATHS.CAMPAIGNS}       element={<Campaigns />} />
+          <Route path={ROUTE_PATHS.CAMPAIGN_DETAIL} element={<CampaignDetail />} />
+          <Route path="/campaign/:id/manage"        element={<CampaignManage />} />
+          <Route path={ROUTE_PATHS.ABOUT}           element={<About />} />
+          <Route path={ROUTE_PATHS.DASHBOARD}       element={<Dashboard />} />
+          <Route path="/create-campaign"            element={<CreateCampaign />} />
+          <Route path="/rewards"                    element={<Rewards />} />
+          <Route path="/admin"                      element={<AdminDashboard />} />
+          <Route path="/verify"                     element={<VerificationRequest />} />
+          <Route path={ROUTE_PATHS.LOGIN}           element={<Home />} />
+          <Route path={ROUTE_PATHS.REGISTER}        element={<Home />} />
+          <Route path="*"                           element={<Home />} />
+        </Routes>
+      </Layout>
+    </Web3Provider>
+  );
+}
+
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -33,24 +61,7 @@ export default function App() {
         <Toaster />
         <Sonner position="top-right" richColors closeButton expand={false} />
         <Router>
-          <Layout>
-            <Routes>
-              <Route path={ROUTE_PATHS.HOME} element={<Home />} />
-              <Route path={ROUTE_PATHS.CAMPAIGNS} element={<Campaigns />} />
-              <Route path={ROUTE_PATHS.CAMPAIGN_DETAIL} element={<CampaignDetail />} />
-              <Route path="/campaign/:id/manage" element={<CampaignManage />} />
-              <Route path={ROUTE_PATHS.ABOUT} element={<About />} />
-              <Route path={ROUTE_PATHS.DASHBOARD} element={<Dashboard />} />
-              <Route path="/create-campaign" element={<CreateCampaign />} />
-              <Route path="/rewards" element={<Rewards />} />
-              <Route path="/admin" element={<AdminDashboard />} />
-              <Route path="/verify" element={<VerificationRequest />} />
-              {/* Login/Register now handled by AuthModal in Layout — keep fallback */}
-              <Route path={ROUTE_PATHS.LOGIN} element={<Home />} />
-              <Route path={ROUTE_PATHS.REGISTER} element={<Home />} />
-              <Route path="*" element={<Home />} />
-            </Routes>
-          </Layout>
+          <AppWithWeb3 />
         </Router>
       </TooltipProvider>
     </QueryClientProvider>

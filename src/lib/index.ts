@@ -32,13 +32,14 @@ export interface Campaign {
   donorCount: number;
   image: string;
   endDate: string;
+  onChainId?: number | null;   // on-chain campaign ID from smart contract
   organizer: {
     id: string;
     name: string;
     avatar?: string;
     isVerified: boolean;
   };
-  status: 'active' | 'completed' | 'draft';
+  status: 'active' | 'completed' | 'draft' | 'cancelled';
 }
 
 export interface Donation {

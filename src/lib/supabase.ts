@@ -25,7 +25,8 @@ export interface DbProfile {
   avatar_url: string | null;
   bio: string | null;
   role: 'admin' | 'donor' | 'organizer';
-  // Verification fields (add these columns to your Supabase profiles table)
+  wallet_address: string | null;
+  // Verification fields
   is_verified: boolean | null;
   verification_status: 'none' | 'pending' | 'approved' | 'rejected' | null;
   created_at: string;
@@ -37,14 +38,16 @@ export interface DbCampaign {
   slug: string;
   description: string;
   short_description: string;
-  category: 'Medical' | 'Education' | 'Environment' | 'Disaster' | 'Community';
+  category: 'Medical' | 'Education' | 'Environment' | 'Disaster' | 'Community'
+    | 'Personal' | 'Creative' | 'Technology' | 'Business' | 'Animals' | 'Sports';
   goal_amount: number;
   current_amount: number;
   donor_count: number;
   image_url: string | null;
   end_date: string;
   organizer_id: string | null;
-  status: 'active' | 'completed' | 'draft';
+  status: 'active' | 'completed' | 'draft' | 'cancelled';
+  on_chain_id: number | null;
   created_at: string;
   profiles?: DbProfile;
 }
@@ -251,6 +254,16 @@ export async function getCampaignUpdates(campaignId: string) {
   return data;
 }
 
+export async function cancelCampaign(campaignId: string) {
+  const { error } = await supabase
+    .from('campaigns')
+    .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+    .eq('id', campaignId);
+  
+  if (error) throw error;
+}
+
+
 export async function updateCampaign(
   campaignId: string,
   updates: {
@@ -406,17 +419,6 @@ export async function updateReportStatus(reportId: string, status: DbReport['sta
   if (error) throw error;
 }
 
-
-
-export async function cancelCampaign(campaignId: string) {
-  const { error } = await supabase
-    .from('campaigns')
-    .update({ status: 'cancelled', updated_at: new Date().toISOString() })
-    .eq('id', campaignId);
-  
-  if (error) throw error;
-}
-
 // ── Cancel campaign with reason + email ───────────────────────
 
 export async function cancelCampaignWithReason(
@@ -425,9 +427,7 @@ export async function cancelCampaignWithReason(
   organizerEmail: string,
   campaignTitle: string,
 ) {
-  
   // 1. Update campaign status
-  
   const { error } = await supabase
     .from('campaigns')
     .update({ status: 'cancelled', updated_at: new Date().toISOString() })
@@ -458,4 +458,14 @@ export async function cancelCampaignWithReason(
     // Email failure should not block the cancel action
     console.error('[send-email] failed:', emailErr);
   }
+}
+
+// ── Wallet binding ────────────────────────────────────────────
+
+export async function bindWalletAddress(userId: string, walletAddress: string) {
+  const { error } = await supabase
+    .from('profiles')
+    .update({ wallet_address: walletAddress })
+    .eq('id', userId);
+  if (error) throw error;
 }

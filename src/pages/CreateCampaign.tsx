@@ -6,6 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { toast } from 'sonner';
 import { createCampaign, supabase } from '@/lib/supabase';
+import { useWeb3 } from '@/context/Web3Context';
 import { useAuth } from '@/hooks/useAuth';
 import { ROUTE_PATHS, RewardType } from '@/lib/index';
 import { Button } from '@/components/ui/button';
@@ -195,6 +196,7 @@ function TierEditor({ tier, index, onUpdate, onRemove }: {
 export default function CreateCampaign() {
   const navigate = useNavigate();
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
+  const { isConnected, connect, createCampaignOnChain } = useWeb3();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [previewUrl, setPreviewUrl] = useState('');
   const [tiers, setTiers] = useState<RewardTier[]>([
@@ -227,11 +229,17 @@ export default function CreateCampaign() {
 
   async function onSubmit(values: FormValues) {
     if (!user) return;
+    if (!isConnected) {
+      toast.error('Please connect your MetaMask wallet first to create a campaign on-chain.');
+      return;
+    }
     const invalid = tiers.find((t) => !t.name.trim());
     if (invalid) { toast.error('Every reward tier needs a name.'); return; }
     setIsSubmitting(true);
     try {
       const slug = slugify(values.title) + '-' + Date.now().toString(36);
+
+      // 1. Create in Supabase first
       const campaign = await createCampaign({
         title: values.title, slug,
         description: values.description,
@@ -243,7 +251,28 @@ export default function CreateCampaign() {
         organizer_id: user.id,
       });
 
-      // Save reward tiers to database
+      // 2. Register on-chain via MetaMask
+      let onChainId: number | null = null;
+      try {
+        toast.info('Please confirm the transaction in MetaMask...');
+        const goalEth = (values.goal_amount * 0.001).toFixed(6); // 1 RM = 0.001 ETH
+        const deadlineTs = Math.floor(new Date(values.end_date).getTime() / 1000);
+        onChainId = await createCampaignOnChain(campaign.id, goalEth, deadlineTs);
+
+        // 3. Save on_chain_id back to Supabase
+        await supabase
+          .from('campaigns')
+          .update({ on_chain_id: onChainId })
+          .eq('id', campaign.id);
+
+        toast.success(`Campaign registered on-chain! ID: ${onChainId}`);
+      } catch (chainErr: any) {
+        // Don't block — campaign exists in Supabase, just not on-chain yet
+        console.error('[on-chain] registration failed:', chainErr.message);
+        toast.warning('Campaign saved but on-chain registration failed. Donors will not be able to contribute until it is registered.');
+      }
+
+      // 4. Save reward tiers
       if (tiers.length > 0) {
         const { error: tiersError } = await supabase
           .from('reward_tiers')
@@ -258,16 +287,17 @@ export default function CreateCampaign() {
               token_amount: t.tokenAmount ?? null,
             })),
           );
-        if (tiersError) {
-          console.error('[reward_tiers] insert error:', tiersError.message);
-          // Don't block — campaign is created, tiers can be added later
-        }
+        if (tiersError) console.error('[reward_tiers] insert error:', tiersError.message);
       }
 
       toast.success(`Campaign is live! ${tiers.length} reward tier${tiers.length !== 1 ? 's' : ''} configured.`);
       navigate(ROUTE_PATHS.CAMPAIGN_DETAIL.replace(':id', campaign.id));
     } catch (err: any) {
-      toast.error(err.message ?? 'Failed to create campaign');
+      if (err?.code === 4001 || err?.message?.includes('user rejected')) {
+        toast.error('Transaction cancelled.');
+      } else {
+        toast.error(err.message ?? 'Failed to create campaign');
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -297,6 +327,23 @@ export default function CreateCampaign() {
             <p className="text-muted-foreground text-lg max-w-2xl">
               Tell the world about your cause — and set up on-chain rewards to automatically thank every donor.
             </p>
+
+            {/* Wallet connection banner */}
+            {!isConnected && (
+              <div className="mt-4 flex items-center justify-between gap-4 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+                <div className="flex items-center gap-3">
+                  <span className="text-xl">🦊</span>
+                  <div>
+                    <p className="font-semibold text-sm text-amber-900">MetaMask required</p>
+                    <p className="text-xs text-amber-700 mt-0.5">Connect your wallet to register your campaign on the blockchain.</p>
+                  </div>
+                </div>
+                <Button size="sm" variant="outline" className="shrink-0 border-amber-300" onClick={connect}>
+                  Connect Wallet
+                </Button>
+              </div>
+            )}
+
             {user && !user.isVerified && (
               <div className="mt-4 flex items-center justify-between gap-4 p-4 bg-primary/5 border border-primary/20 rounded-xl">
                 <div className="flex items-center gap-3">

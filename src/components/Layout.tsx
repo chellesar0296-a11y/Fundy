@@ -14,7 +14,7 @@ import {
   DropdownMenuTrigger, DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
 import { AuthModal } from '@/components/AuthModal';
-
+import { WalletConnect } from '@/components/WalletConnect';
 interface LayoutProps {
   children: React.ReactNode;
 }
@@ -137,6 +137,7 @@ export function Layout({ children }: LayoutProps) {
                     <Plus className="w-4 h-4" /> Start Campaign
                   </Link>
                 </Button>
+                <WalletConnect />
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="ghost" className="relative h-10 w-10 rounded-full p-0 overflow-hidden border border-border">
