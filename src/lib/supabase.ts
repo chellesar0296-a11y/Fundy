@@ -232,6 +232,7 @@ export async function createCampaignUpdate(data: {
   content: string;
   author_id: string;
   author_name: string;
+  image_url?: string | null;
 }) {
   const { data: update, error } = await supabase
     .from('campaign_updates')
@@ -241,6 +242,32 @@ export async function createCampaignUpdate(data: {
   
   if (error) throw error;
   return update;
+}
+
+// ── Storage helpers ───────────────────────────────────────────
+
+/**
+ * Upload a file to Supabase Storage.
+ * Bucket must exist — create "campaign-media" bucket in Supabase Dashboard → Storage.
+ * @param file      File to upload
+ * @param folder    Folder inside the bucket (e.g. campaign id)
+ * @returns Public URL of the uploaded file
+ */
+export async function uploadMedia(file: File, folder: string): Promise<string> {
+  const ext      = file.name.split('.').pop();
+  const filename = `${folder}/${Date.now()}.${ext}`;
+
+  const { error } = await supabase.storage
+    .from('campaign-media')
+    .upload(filename, file, { upsert: true });
+
+  if (error) throw error;
+
+  const { data } = supabase.storage
+    .from('campaign-media')
+    .getPublicUrl(filename);
+
+  return data.publicUrl;
 }
 
 export async function getCampaignUpdates(campaignId: string) {

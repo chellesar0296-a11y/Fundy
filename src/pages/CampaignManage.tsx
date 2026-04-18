@@ -32,6 +32,7 @@ import {
   cancelCampaign,
   getCampaignUpdates,
   updateCampaign,
+  uploadMedia,
 } from '@/lib/supabase';
 
 export default function CampaignManage() {
@@ -45,6 +46,9 @@ export default function CampaignManage() {
   const [updateTitle, setUpdateTitle] = useState('');
   const [updateContent, setUpdateContent] = useState('');
   const [isPostingUpdate, setIsPostingUpdate] = useState(false);
+  const [mediaFile, setMediaFile] = useState<File | null>(null);
+  const [mediaPreview, setMediaPreview] = useState<string | null>(null);
+  const [isUploadingMedia, setIsUploadingMedia] = useState(false);
   const [updates, setUpdates] = useState<any[]>([]);
 
   // Edit campaign state
@@ -104,16 +108,32 @@ export default function CampaignManage() {
     }
     setIsPostingUpdate(true);
     try {
+      // Upload media if selected
+      let imageUrl: string | null = null;
+      if (mediaFile) {
+        setIsUploadingMedia(true);
+        try {
+          imageUrl = await uploadMedia(mediaFile, `updates/${id}`);
+        } catch (uploadErr) {
+          toast.error('Failed to upload image. Post will be saved without it.');
+        } finally {
+          setIsUploadingMedia(false);
+        }
+      }
+
       await createCampaignUpdate({
         campaign_id: id!,
         title: updateTitle,
         content: updateContent,
         author_id: user!.id,
         author_name: user!.name,
+        image_url: imageUrl,
       });
       toast.success('Update posted successfully!');
       setUpdateTitle('');
       setUpdateContent('');
+      setMediaFile(null);
+      setMediaPreview(null);
       const newUpdates = await getCampaignUpdates(id!);
       setUpdates(newUpdates);
     } catch (error) {
@@ -406,16 +426,52 @@ export default function CampaignManage() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label>Add Media (Coming Soon)</Label>
-                    <div className="border-2 border-dashed rounded-lg p-6 text-center text-muted-foreground">
-                      <ImagePlus className="w-8 h-8 mx-auto mb-2" />
-                      <p className="text-sm">Drag & drop images or click to upload</p>
-                      <p className="text-xs">Supporters love seeing photos of the impact!</p>
-                    </div>
+                    <Label>Add Image (Optional)</Label>
+                    {mediaPreview ? (
+                      <div className="relative">
+                        <img
+                          src={mediaPreview}
+                          alt="Preview"
+                          className="w-full h-48 object-cover rounded-lg border"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => { setMediaFile(null); setMediaPreview(null); }}
+                          className="absolute top-2 right-2 bg-destructive text-white rounded-full w-6 h-6 flex items-center justify-center text-xs hover:bg-destructive/80"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ) : (
+                      <label className="flex flex-col items-center justify-center border-2 border-dashed rounded-lg p-6 text-center text-muted-foreground cursor-pointer hover:border-primary/50 hover:bg-muted/30 transition-colors">
+                        <ImagePlus className="w-8 h-8 mx-auto mb-2" />
+                        <p className="text-sm font-medium">Click to upload an image</p>
+                        <p className="text-xs mt-1">JPG, PNG, GIF up to 5MB</p>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            if (file.size > 5 * 1024 * 1024) {
+                              toast.error('File size must be under 5MB');
+                              return;
+                            }
+                            setMediaFile(file);
+                            setMediaPreview(URL.createObjectURL(file));
+                          }}
+                        />
+                      </label>
+                    )}
                   </div>
-                  <Button onClick={handlePostUpdate} disabled={isPostingUpdate} className="w-full">
-                    {isPostingUpdate ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Send className="w-4 h-4 mr-2" />}
-                    Publish Update
+                  <Button onClick={handlePostUpdate} disabled={isPostingUpdate || isUploadingMedia} className="w-full">
+                    {isUploadingMedia
+                      ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Uploading image...</>
+                      : isPostingUpdate
+                        ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Publishing...</>
+                        : <><Send className="w-4 h-4 mr-2" /> Publish Update</>
+                    }
                   </Button>
                 </CardContent>
               </Card>

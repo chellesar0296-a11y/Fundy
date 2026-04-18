@@ -23,6 +23,8 @@ import { useLanguage } from '@/hooks/useLanguage';
 import { useCampaign } from '@/hooks/useCampaigns';
 import { getCampaignUpdates, submitReport } from '@/lib/supabase';
 import { useAuth } from '@/hooks/useAuth';
+import { useWeb3, CROWDFUNDING_ABI, CONTRACT_ADDRESSES } from '@/context/Web3Context';
+import { ethers } from 'ethers';
 import { Loader2 } from 'lucide-react';
 import { ProgressBar } from '@/components/ProgressBar';
 import { SocialShare } from '@/components/SocialShare';
@@ -41,12 +43,14 @@ export default function CampaignDetail() {
   const navigate = useNavigate();
   const { t } = useLanguage();
   const { user } = useAuth();
+  const { provider, isConnected } = useWeb3();
   const [isDonationOpen, setIsDonationOpen] = useState(false);
   const [isReportOpen, setIsReportOpen] = useState(false);
   const [reportReasonType, setReportReasonType] = useState<'spam' | 'fraud' | 'inappropriate' | 'other'>('fraud');
   const [reportDetail, setReportDetail] = useState('');
   const [isSubmittingReport, setIsSubmittingReport] = useState(false);
   const [updates, setUpdates] = useState<any[]>([]);
+  const [onChainDonors, setOnChainDonors] = useState<any[]>([]);
   const { campaign, isLoading, rewardTiers } = useCampaign(id ?? '');
 
   useEffect(() => {
@@ -58,6 +62,32 @@ export default function CampaignDetail() {
       getCampaignUpdates(id).then(setUpdates).catch(() => setUpdates([]));
     }
   }, [id]);
+
+  // Fetch on-chain donors when campaign.onChainId is available
+  useEffect(() => {
+    if (!campaign?.onChainId || !provider) return;
+    const contract = new ethers.Contract(CONTRACT_ADDRESSES.crowdfunding, CROWDFUNDING_ABI, provider);
+    const filter   = contract.filters.DonationReceived(campaign.onChainId);
+    contract.queryFilter(filter, 0, 'latest')
+      .then(async (events: any[]) => {
+        const seen = new Set<string>();
+        const donors = await Promise.all(
+          events.map(async (e) => {
+            if (seen.has(e.args.donor)) return null;
+            seen.add(e.args.donor);
+            const block = await provider.getBlock(e.blockNumber);
+            return {
+              address:  e.args.donor as string,
+              amount:   ethers.formatEther(e.args.amount),
+              amountRm: (Number(ethers.formatEther(e.args.amount)) / 0.001).toFixed(0),
+              date:     block ? new Date(Number(block.timestamp) * 1000) : null,
+            };
+          })
+        );
+        setOnChainDonors(donors.filter(Boolean).reverse());
+      })
+      .catch(() => setOnChainDonors([]));
+  }, [campaign?.onChainId, provider]);
 
   if (isLoading) {
     return (
@@ -412,20 +442,39 @@ export default function CampaignDetail() {
               {/* Recent Donors Peek (Mock) */}
               <Card className="border-dashed">
                 <CardContent className="p-6">
-                  <h4 className="font-bold mb-4">Recent Support</h4>
-                  <div className="space-y-4">
-                    {[1, 2, 3].map((_, i) => (
-                      <div key={i} className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary">
-                          D{i + 1}
+                  <h4 className="font-bold mb-4">
+                    Recent Support
+                    {onChainDonors.length > 0 && (
+                      <span className="ml-2 text-xs font-normal text-muted-foreground">({onChainDonors.length} donors)</span>
+                    )}
+                  </h4>
+                  {onChainDonors.length === 0 ? (
+                    <div className="text-center py-4 text-muted-foreground">
+                      <p className="text-sm">
+                        {campaign?.onChainId
+                          ? 'No donations yet. Be the first!'
+                          : 'Campaign not yet on-chain.'}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {onChainDonors.slice(0, 5).map((donor, i) => (
+                        <div key={donor.address} className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary shrink-0">
+                            {i + 1}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold font-mono truncate">
+                              {donor.address.slice(0, 8)}...{donor.address.slice(-4)}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              RM{donor.amountRm} · {donor.date ? donor.date.toLocaleDateString() : '—'}
+                            </p>
+                          </div>
                         </div>
-                        <div className="flex-1">
-                          <p className="text-sm font-semibold">Anonymous Donor</p>
-                          <p className="text-xs text-muted-foreground">Donated RM50 • 2h ago</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </div>

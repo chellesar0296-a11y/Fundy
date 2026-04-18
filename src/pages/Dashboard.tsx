@@ -25,6 +25,8 @@ import { useLanguage } from '@/hooks/useLanguage';
 import { useAuth } from '@/hooks/useAuth';
 import { useCampaigns } from '@/hooks/useCampaigns';
 import { fetchUserDonations, fetchUserCampaigns, fetchUserRewards, DbReward } from '@/lib/supabase';
+import { useWeb3, CROWDFUNDING_ABI, CONTRACT_ADDRESSES } from '@/context/Web3Context';
+import { ethers } from 'ethers';
 import { dbCampaignToFrontend } from '@/hooks/useCampaigns';
 import { Campaign } from '@/lib/index';
 import { CampaignCard, StatsCard } from '@/components/Cards';
@@ -47,9 +49,18 @@ const springTransition = {
 
 export default function Dashboard() {
   const { t } = useLanguage();
-  const { user, isAuthenticated, logout, updateProfile, isLoading } = useAuth();
+  const { user, isAuthenticated, logout, updateProfile, isLoading, refreshProfile } = useAuth();
+  const { isConnected, address, provider, fdyBalance, ethBalance } = useWeb3();
+
+  useEffect(() => {
+    refreshProfile?.();
+  }, []);
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('overview');
+
+  // On-chain transactions fetched from contract events
+  const [onChainTxs, setOnChainTxs] = useState<any[]>([]);
+  const [onChainLoading, setOnChainLoading] = useState(false);
 
   // ✅ All hooks MUST be called before any early returns (React rules of hooks)
   const { campaigns } = useCampaigns();
@@ -105,6 +116,39 @@ export default function Dashboard() {
       .catch(() => setUserRewards([]))
       .finally(() => setRewardsLoading(false));
   }, [user?.id]);
+
+  // Fetch on-chain donation events for connected wallet
+  useEffect(() => {
+    if (!isConnected || !address || !provider) return;
+    if (CONTRACT_ADDRESSES.crowdfunding === '0x0000000000000000000000000000000000000000') return;
+
+    setOnChainLoading(true);
+    const contract = new ethers.Contract(CONTRACT_ADDRESSES.crowdfunding, CROWDFUNDING_ABI, provider);
+
+    // Query DonationReceived events where donor = connected address
+    const filter = contract.filters.DonationReceived(null, address);
+    contract.queryFilter(filter, 0, 'latest')
+      .then(async (events) => {
+        const txs = await Promise.all(events.map(async (e: any) => {
+          const block = await provider.getBlock(e.blockNumber);
+          return {
+            txHash:     e.transactionHash,
+            campaignId: Number(e.args.campaignId),
+            amount:     ethers.formatEther(e.args.amount),
+            amountRm:   (Number(ethers.formatEther(e.args.amount)) / 0.001).toFixed(2),
+            tokens:     ethers.formatEther(e.args.tokensAwarded),
+            timestamp:  block ? new Date(Number(block.timestamp) * 1000) : null,
+          };
+        }));
+        // Sort newest first
+        setOnChainTxs(txs.reverse());
+      })
+      .catch((err) => {
+        console.error('[on-chain txs]', err);
+        setOnChainTxs([]);
+      })
+      .finally(() => setOnChainLoading(false));
+  }, [isConnected, address, provider]);
 
   // Early returns AFTER all hooks
   if (!isAuthenticated && !isLoading) {
@@ -176,7 +220,24 @@ export default function Dashboard() {
         </header>
 
         {/* Verification Banner */}
-        {user.verificationStatus === 'none' && (
+        {/* Show verified banner if either isVerified=true OR verificationStatus=approved */}
+        {(user.isVerified || user.verificationStatus === 'approved') ? (
+          <div className="mb-6 flex items-center gap-4 p-4 bg-emerald-50 border border-emerald-200 rounded-xl">
+            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+            <div>
+              <p className="font-semibold text-sm text-emerald-800">Account Verified ✓</p>
+              <p className="text-xs text-emerald-700 mt-0.5">Your identity has been verified. A verified badge is displayed on your profile and campaigns.</p>
+            </div>
+          </div>
+        ) : user.verificationStatus === 'pending' ? (
+          <div className="mb-6 flex items-center gap-4 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+            <Clock className="w-5 h-5 text-amber-600 shrink-0" />
+            <div>
+              <p className="font-semibold text-sm text-amber-800">Verification Under Review</p>
+              <p className="text-xs text-amber-700 mt-0.5">Your verification request has been submitted and is being reviewed by our team. This usually takes 1–3 business days.</p>
+            </div>
+          </div>
+        ) : (
           <div className="mb-6 flex items-center justify-between gap-4 p-4 bg-primary/5 border border-primary/20 rounded-xl">
             <div className="flex items-center gap-3">
               <ShieldAlert className="w-5 h-5 text-primary shrink-0" />
@@ -188,24 +249,6 @@ export default function Dashboard() {
             <Button size="sm" variant="outline" className="shrink-0" onClick={() => navigate('/verify')}>
               Apply Now
             </Button>
-          </div>
-        )}
-        {user.verificationStatus === 'pending' && (
-          <div className="mb-6 flex items-center gap-4 p-4 bg-amber-50 border border-amber-200 rounded-xl">
-            <Clock className="w-5 h-5 text-amber-600 shrink-0" />
-            <div>
-              <p className="font-semibold text-sm text-amber-800">Verification Under Review</p>
-              <p className="text-xs text-amber-700 mt-0.5">Your verification request has been submitted and is being reviewed by our team. This usually takes 1–3 business days.</p>
-            </div>
-          </div>
-        )}
-        {user.verificationStatus === 'approved' && (
-          <div className="mb-6 flex items-center gap-4 p-4 bg-emerald-50 border border-emerald-200 rounded-xl">
-            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-            <div>
-              <p className="font-semibold text-sm text-emerald-800">Account Verified</p>
-              <p className="text-xs text-emerald-700 mt-0.5">Your identity has been verified. A verified badge is displayed on your profile and campaigns.</p>
-            </div>
           </div>
         )}
 
@@ -511,51 +554,75 @@ export default function Dashboard() {
                 animate={{ opacity: 1, y: 0 }}
                 className="bg-card border rounded-xl overflow-hidden"
               >
-                <div className="p-6 border-b bg-muted/20">
-                  <h3 className="text-xl font-bold">Transaction History</h3>
-                  <p className="text-sm text-muted-foreground">Complete list of all donations and support provided.</p>
-                </div>
-                <div className="overflow-x-auto">
-                  {donationsLoading ? (
-                    <div className="flex justify-center py-12"><div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>
-                  ) : userDonations.length === 0 ? (
-                    <div className="text-center py-16 text-muted-foreground">
-                      <p className="text-lg font-medium mb-2">No donations yet</p>
-                      <p className="text-sm">Your donation history will appear here.</p>
+                <div className="p-6 border-b bg-muted/20 flex items-start justify-between gap-4">
+                  <div>
+                    <h3 className="text-xl font-bold">Transaction History</h3>
+                    <p className="text-sm text-muted-foreground">On-chain donation records from the smart contract.</p>
+                  </div>
+                  {isConnected && (
+                    <div className="text-right shrink-0">
+                      <p className="text-xs text-muted-foreground">Wallet</p>
+                      <p className="font-mono text-xs font-semibold">{address?.slice(0,8)}...{address?.slice(-4)}</p>
+                      <p className="text-xs text-primary mt-0.5">{ethBalance} ETH · {Number(fdyBalance).toFixed(0)} FDY</p>
                     </div>
-                  ) : (
-                  <table className="w-full text-sm text-left">
-                    <thead className="bg-muted/50 text-muted-foreground font-medium border-b">
-                      <tr>
-                        <th className="px-6 py-4">Date</th>
-                        <th className="px-6 py-4">Campaign</th>
-                        <th className="px-6 py-4">Amount</th>
-                        <th className="px-6 py-4">Status</th>
-                        <th className="px-6 py-4">Receipt</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y">
-                      {userDonations.map((donation) => (
-                        <tr key={donation.id} className="hover:bg-muted/30 transition-colors">
-                          <td className="px-6 py-4">{new Date(donation.date).toLocaleDateString()}</td>
-                          <td className="px-6 py-4 font-medium">{donation.campaignTitle}</td>
-                          <td className="px-6 py-4">RM{donation.amount}</td>
-                          <td className="px-6 py-4">
-                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${donation.status === 'Completed' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                              {donation.status}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4">
-                            <Button variant="ghost" size="sm" className="text-primary hover:text-primary/80">
-                              Download
-                            </Button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
                   )}
                 </div>
+
+                {!isConnected ? (
+                  <div className="text-center py-16 text-muted-foreground space-y-3">
+                    <div className="text-4xl">🦊</div>
+                    <p className="font-medium">Connect your wallet to view on-chain transactions</p>
+                    <p className="text-sm">Your MetaMask wallet address is needed to look up your donation records on the blockchain.</p>
+                  </div>
+                ) : onChainLoading ? (
+                  <div className="flex justify-center py-12">
+                    <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                  </div>
+                ) : onChainTxs.length === 0 ? (
+                  <div className="text-center py-16 text-muted-foreground">
+                    <p className="text-lg font-medium mb-2">No on-chain donations yet</p>
+                    <p className="text-sm">Donations made through MetaMask will appear here.</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm text-left">
+                      <thead className="bg-muted/50 text-muted-foreground font-medium border-b">
+                        <tr>
+                          <th className="px-6 py-4">Date</th>
+                          <th className="px-6 py-4">Campaign ID</th>
+                          <th className="px-6 py-4">Amount (RM)</th>
+                          <th className="px-6 py-4">Amount (ETH)</th>
+                          <th className="px-6 py-4">FDY Earned</th>
+                          <th className="px-6 py-4">Tx Hash</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {onChainTxs.map((tx) => (
+                          <tr key={tx.txHash} className="hover:bg-muted/30 transition-colors">
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              {tx.timestamp ? tx.timestamp.toLocaleDateString() : '—'}
+                            </td>
+                            <td className="px-6 py-4 text-muted-foreground">#{tx.campaignId}</td>
+                            <td className="px-6 py-4 font-semibold">RM{tx.amountRm}</td>
+                            <td className="px-6 py-4 text-muted-foreground">{Number(tx.amount).toFixed(6)} ETH</td>
+                            <td className="px-6 py-4">
+                              <span className="text-primary font-medium">+{Number(tx.tokens).toFixed(2)} FDY</span>
+                            </td>
+                            <td className="px-6 py-4">
+                              <a
+                                href={`#`}
+                                className="font-mono text-xs text-primary hover:underline"
+                                title={tx.txHash}
+                              >
+                                {tx.txHash.slice(0, 10)}...{tx.txHash.slice(-6)}
+                              </a>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </motion.div>
             </TabsContent>
 
