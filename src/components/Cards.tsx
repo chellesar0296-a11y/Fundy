@@ -120,8 +120,10 @@ export function CampaignCard({ campaign }: CampaignCardProps) {
               {t('btn_learn_more')}
             </Link>
           </Button>
-          <Button className="w-full rounded-xl shadow-lg shadow-primary/20">
-            {t('btn_donate')}
+          <Button asChild className="w-full rounded-xl shadow-lg shadow-primary/20">
+            <Link to={ROUTE_PATHS.CAMPAIGN_DETAIL.replace(':id', campaign.id)}>
+              {t('btn_donate')}
+            </Link>
           </Button>
         </CardFooter>
       </Card>

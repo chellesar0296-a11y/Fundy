@@ -1,17 +1,20 @@
 // Rewards.tsx
-import React from 'react';
+import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Gift, Coins, Image as ImageIcon, ShieldCheck, CheckCircle2, Clock, Loader2, Star, Zap } from 'lucide-react';
+import {
+  Gift, Coins, Image as ImageIcon, CheckCircle2, Clock,
+  Loader2, Star, Zap, Lock, Share2,
+} from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useRewards } from '@/hooks/useRewards';
-import { useWallet } from '@/hooks/useWallet';
-import { useLanguage } from '@/hooks/useLanguage';
 import { useNavigate } from 'react-router-dom';
+import { useWeb3 } from '@/context/Web3Context';
 import { ROUTE_PATHS, Reward, CreditScore } from '@/lib/index';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 
 const LEVEL_COLORS: Record<string, string> = {
@@ -22,9 +25,11 @@ const LEVEL_COLORS: Record<string, string> = {
 };
 
 const TYPE_ICON: Record<string, React.ElementType> = {
-  ERC721: ImageIcon,
-  ERC20:  Coins,
-  badge:  Gift,
+  ERC721: ImageIcon, ERC20: Coins, badge: Gift, physical: Gift,
+};
+
+const TYPE_LABEL: Record<string, string> = {
+  ERC721: 'NFT', ERC20: 'Token', badge: 'Badge', physical: 'Physical',
 };
 
 const STATUS_COLOR: Record<string, string> = {
@@ -34,73 +39,35 @@ const STATUS_COLOR: Record<string, string> = {
   failed:  'bg-red-100 text-red-700',
 };
 
-const STATUS_LABEL: Record<string, string> = {
-  pending: 'Pending',
-  minted:  'Minted',
-  claimed: 'Claimed',
-  failed:  'Failed',
-};
-
-// Format currency to RM
-const formatRM = (amount: number): string => {
-  return new Intl.NumberFormat('ms-MY', {
-    style: 'currency',
-    currency: 'MYR',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  }).format(amount);
-};
-
-// ── Credit score card (fixed layout) ─────────────────────────────────────────
+// ── Credit Score ──────────────────────────────────────────────
 function CreditScoreCard({ score }: { score: CreditScore }) {
   const pct = Math.min((score.score / 1000) * 100, 100);
-  
   return (
     <Card className="overflow-hidden">
-      {/* Progress bar at top */}
-      <div 
-        className="h-2 bg-gradient-to-r from-amber-400 via-yellow-300 to-violet-500 transition-all duration-500" 
-        style={{ width: `${pct}%` }} 
-      />
-      
-      <CardHeader className="pb-2">
-        <CardTitle className="flex items-center gap-2">
-          <Star className="w-5 h-5 text-yellow-500" /> 
-          Credit Score
-        </CardTitle>
-        <CardDescription>
-          The more you contribute, the higher your score and the rarer your rewards
-        </CardDescription>
-      </CardHeader>
-      
-      <CardContent className="space-y-4">
-        {/* Score row - fixed layout */}
-        <div className="flex items-end justify-between gap-2 flex-wrap">
-          <div className="flex items-baseline gap-1">
-            <span className="text-5xl font-extrabold tabular-nums">{score.score}</span>
-            <span className="text-muted-foreground text-xl">/ 1000</span>
+      <div className="h-2 bg-gradient-to-r from-amber-400 via-yellow-400 to-violet-500" style={{ width: `${pct}%` }} />
+      <CardContent className="p-6">
+        <div className="flex items-start justify-between gap-4 mb-4">
+          <div>
+            <p className="text-sm text-muted-foreground">Credit Score</p>
+            <p className="text-4xl font-extrabold mt-1">{score.score}<span className="text-lg text-muted-foreground">/1000</span></p>
           </div>
-          <span className={`px-3 py-1 rounded-full border text-sm font-bold whitespace-nowrap ${LEVEL_COLORS[score.level]}`}>
-            {score.level}
-          </span>
+          <Badge className={`text-sm px-3 py-1 border ${LEVEL_COLORS[score.level]}`}>
+            <Star className="w-3.5 h-3.5 mr-1" /> {score.level}
+          </Badge>
         </div>
-        
-        {/* Progress bar */}
-        <Progress value={pct} className="h-2" />
-        
-        {/* Stats grid - fixed alignment */}
-        <div className="grid grid-cols-3 gap-3 pt-2 text-center">
-          <div className="bg-muted/40 rounded-lg p-3">
-            <p className="font-bold text-xl">{formatRM(score.totalDonations)}</p>
-            <p className="text-muted-foreground text-xs mt-1">Total donated</p>
+        <Progress value={pct} className="h-2 mb-5" />
+        <div className="grid grid-cols-3 gap-4 text-center text-sm">
+          <div>
+            <p className="text-2xl font-bold">RM{score.totalDonations.toLocaleString()}</p>
+            <p className="text-xs text-muted-foreground">Total Donated</p>
           </div>
-          <div className="bg-muted/40 rounded-lg p-3">
-            <p className="font-bold text-xl">{score.campaignsSupported}</p>
-            <p className="text-muted-foreground text-xs mt-1">Campaigns</p>
+          <div>
+            <p className="text-2xl font-bold">{score.campaignsSupported}</p>
+            <p className="text-xs text-muted-foreground">Campaigns</p>
           </div>
-          <div className="bg-muted/40 rounded-lg p-3">
-            <p className="font-bold text-xl">{score.streakDays}d</p>
-            <p className="text-muted-foreground text-xs mt-1">Streak</p>
+          <div>
+            <p className="text-2xl font-bold">{score.streakDays}</p>
+            <p className="text-xs text-muted-foreground">Streak Days</p>
           </div>
         </div>
       </CardContent>
@@ -108,286 +75,296 @@ function CreditScoreCard({ score }: { score: CreditScore }) {
   );
 }
 
-// ── Reward card ───────────────────────────────────────────────
-function RewardCard({ reward, onClaim }: { reward: Reward; onClaim: (id: string) => void }) {
+// ── Reward Card ───────────────────────────────────────────────
+function RewardCard({ reward, onClaim, isLoggedIn, userName }: {
+  reward: Reward;
+  onClaim: (id: string) => Promise<void>;
+  isLoggedIn: boolean;
+  userName?: string;
+}) {
   const Icon = TYPE_ICON[reward.type] ?? Gift;
-  const [claiming, setClaiming] = React.useState(false);
+  const [claiming, setClaiming] = useState(false);
+  const [showDetail, setShowDetail] = useState(false);
 
-  const handleClaim = async () => {
+  const handleClaim = async (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (!isLoggedIn) { toast.error('Please log in to claim rewards.'); return; }
+    if (reward.status === 'claimed') { toast.info('Already claimed!'); return; }
+    if (reward.status !== 'minted') { toast.info('Not ready to claim yet.'); return; }
     setClaiming(true);
     try {
-      await new Promise((r) => setTimeout(r, 1200));
-      onClaim(reward.id);
-      toast.success(`${reward.name} claimed!`);
-    } catch (error) {
-      toast.error(`Failed to claim ${reward.name}. Please try again.`);
+      await onClaim(reward.id);
+      toast.success(`${reward.name} claimed! 🎉`);
+    } catch {
+      toast.error('Failed to claim. Please try again.');
     } finally {
       setClaiming(false);
     }
   };
 
+  const handleShare = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    const text = `🎖️ I just earned "${reward.name}" on Fundy!\n\nI donated to "${reward.campaignTitle}" and received this reward.${userName ? `\n\n— ${userName}` : ''}\n\nJoin me on Fundy! 🌟`;
+    if (navigator.share) {
+      navigator.share({ title: `Fundy Reward — ${reward.name}`, text }).catch(() => {});
+    } else {
+      navigator.clipboard.writeText(text);
+      toast.success('Share text copied to clipboard!');
+    }
+  };
+
+  const bgColor = reward.status === 'claimed' ? 'bg-emerald-50' : reward.status === 'minted' ? 'bg-blue-50' : 'bg-muted/40';
+  const iconColor = reward.status === 'claimed' ? 'text-emerald-500' : reward.status === 'minted' ? 'text-blue-500' : 'text-muted-foreground';
+
   return (
-    <motion.div 
-      initial={{ opacity: 0, y: 16 }} 
-      animate={{ opacity: 1, y: 0 }} 
-      transition={{ duration: 0.4 }}
-    >
-      <Card className="hover:shadow-md transition-shadow overflow-hidden">
-        <div className="flex flex-col sm:flex-row">
-          {/* Image/Icon area */}
-          <div className="w-full sm:w-24 h-24 sm:h-auto flex-shrink-0 bg-primary/5 flex items-center justify-center border-b sm:border-b-0 sm:border-r">
-            {reward.imageUrl ? (
-              <img src={reward.imageUrl} alt={reward.name} className="w-16 h-16 rounded-xl object-contain" />
-            ) : (
-              <Icon className="w-10 h-10 text-primary/40" />
-            )}
+    <>
+      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}>
+        <Card
+          className={`overflow-hidden hover:shadow-md transition-shadow cursor-pointer ${reward.status === 'claimed' ? 'opacity-90' : ''}`}
+          onClick={() => setShowDetail(true)}
+        >
+          <div className={`h-28 flex items-center justify-center ${bgColor}`}>
+            {reward.imageUrl
+              ? <img src={reward.imageUrl} alt={reward.name} className="h-full w-full object-cover" />
+              : <div className="p-4 rounded-full bg-white/60"><Icon className={`w-10 h-10 ${iconColor}`} /></div>
+            }
           </div>
-          
-          {/* Content area */}
-          <div className="flex-1 p-4 flex flex-col gap-2">
-            <div className="flex items-start justify-between gap-2 flex-wrap">
-              <div className="flex-1 min-w-0">
-                <p className="font-bold text-sm leading-tight truncate">{reward.name}</p>
-                <p className="text-xs text-muted-foreground truncate">{reward.campaignTitle}</p>
+          <CardContent className="p-4 space-y-2">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="font-bold text-sm line-clamp-1">{reward.name}</p>
+                <p className="text-xs text-muted-foreground line-clamp-1">{reward.campaignTitle}</p>
               </div>
-              <span className={`shrink-0 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${STATUS_COLOR[reward.status]}`}>
-                {STATUS_LABEL[reward.status]}
+              <span className={`shrink-0 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${STATUS_COLOR[reward.status] ?? ''}`}>
+                {reward.status === 'minted' ? 'Ready' : reward.status}
               </span>
             </div>
-            
-            <p className="text-xs text-muted-foreground line-clamp-2">{reward.description}</p>
-            
-            {reward.type === 'ERC20' && reward.tokenAmount && (
-              <div className="flex items-center gap-1 text-xs font-semibold text-primary">
-                <Coins className="w-3 h-3" /> {reward.tokenAmount} FUNDY Tokens
-              </div>
-            )}
-            
-            {reward.contractAddress && (
-              <p className="text-[10px] font-mono text-muted-foreground truncate">{reward.contractAddress}</p>
-            )}
-            
-            {reward.status === 'minted' && (
-              <Button 
-                size="sm" 
-                className="self-start mt-1" 
-                onClick={handleClaim} 
-                disabled={claiming}
-                aria-label={`Claim ${reward.name} reward`}
-              >
-                {claiming ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Zap className="w-3 h-3 mr-1" />}
-                Claim reward
-              </Button>
-            )}
-            
-            {reward.status === 'claimed' && (
-              <div className="flex items-center gap-1 text-xs text-emerald-600 font-medium">
-                <CheckCircle2 className="w-3 h-3" />
-                {reward.claimedAt ? `Claimed on ${new Date(reward.claimedAt).toLocaleDateString()}` : 'Claimed'}
-              </div>
-            )}
-            
-            {reward.status === 'pending' && (
-              <div className="flex items-center gap-1 text-xs text-amber-600">
-                <Clock className="w-3 h-3" /> Awaiting on-chain confirmation...
-              </div>
-            )}
-          </div>
-        </div>
-      </Card>
-    </motion.div>
-  );
-}
-
-// Loading skeleton component
-function LoadingSkeleton() {
-  return (
-    <div className="space-y-4">
-      <div className="animate-pulse">
-        <div className="h-64 bg-muted rounded-xl" />
-      </div>
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-1">
-          <div className="h-80 bg-muted rounded-xl animate-pulse" />
-        </div>
-        <div className="lg:col-span-2 space-y-4">
-          <div className="h-32 bg-muted rounded-xl animate-pulse" />
-          <div className="h-32 bg-muted rounded-xl animate-pulse" />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Empty rewards component
-function EmptyRewardsState({ onNavigate }: { onNavigate: () => void }) {
-  return (
-    <Card>
-      <CardContent className="flex flex-col items-center justify-center py-16 text-center text-muted-foreground">
-        <Gift className="w-12 h-12 mb-4 opacity-20" />
-        <p className="font-medium">No rewards yet</p>
-        <p className="text-sm mt-1">Make a donation to automatically earn Token or NFT rewards</p>
-        <Button className="mt-4" onClick={onNavigate}>
-          Explore campaigns
-        </Button>
-      </CardContent>
-    </Card>
-  );
-}
-
-// Unauthenticated state component
-function UnauthenticatedState({ onNavigate }: { onNavigate: () => void }) {
-  return (
-    <div className="min-h-[80vh] flex flex-col items-center justify-center p-6 text-center">
-      <div className="bg-accent/20 p-6 rounded-full mb-6">
-        <ShieldCheck className="w-16 h-16 text-primary" />
-      </div>
-      <h2 className="text-3xl font-bold mb-4">Sign in required</h2>
-      <p className="text-muted-foreground max-w-md mb-8">
-        Please log in to view and claim your donation rewards and NFTs.
-      </p>
-      <Button size="lg" onClick={onNavigate}>
-        Sign In
-      </Button>
-    </div>
-  );
-}
-
-// ── Main page ─────────────────────────────────────────────────
-export default function Rewards() {
-  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
-  const { rewards, creditScore, isLoading, claimReward, pendingCount } = useRewards(user?.id);
-  const { wallet, connect, disconnect, isConnecting, isConnected, shortAddress, networkName, isMetaMaskInstalled } = useWallet();
-  const { t } = useLanguage();
-  const navigate = useNavigate();
-
-  // Loading state
-  if (authLoading) {
-    return (
-      <div className="min-h-[60vh] flex items-center justify-center">
-        <Loader2 className="w-10 h-10 animate-spin text-primary" />
-      </div>
-    );
-  }
-
-  // Unauthenticated state
-  if (!isAuthenticated) {
-    return <UnauthenticatedState onNavigate={() => navigate(ROUTE_PATHS.LOGIN)} />;
-  }
-
-  return (
-    <div className="max-w-4xl mx-auto px-4 py-10">
-      <motion.div 
-        initial={{ opacity: 0, y: 20 }} 
-        animate={{ opacity: 1, y: 0 }}
-        className="space-y-6"
-      >
-        {/* Header */}
-        <div className="mb-6">
-          <h1 className="text-3xl font-extrabold tracking-tight mb-2 flex items-center gap-2">
-            <Gift className="w-8 h-8 text-primary" /> 
-            My Rewards & Score
-          </h1>
-          <p className="text-muted-foreground">
-            Every donation triggers an on-chain reward. Connect your wallet to mint and claim Token / NFT rewards.
-          </p>
-        </div>
-
-        {/* Wallet connect banner */}
-        <Card className={`border-2 transition-colors ${
-          isConnected ? 'border-emerald-200 bg-emerald-50/40' : 'border-primary/20'
-        }`}>
-          <CardContent className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 py-5">
-            <div className="flex-1">
-              {isConnected ? (
-                <>
-                  <p className="font-semibold text-emerald-700 flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4" /> Wallet connected
-                  </p>
-                  <p className="text-sm text-muted-foreground font-mono mt-0.5">
-                    {shortAddress} · {networkName} · {wallet?.balance} ETH
-                  </p>
-                </>
-              ) : (
-                <>
-                  <p className="font-semibold">Connect your Web3 wallet</p>
-                  <p className="text-sm text-muted-foreground mt-0.5">
-                    {isMetaMaskInstalled 
-                      ? 'Connect MetaMask to mint and claim on-chain rewards' 
-                      : 'Please install the MetaMask browser extension first'}
-                  </p>
-                </>
-              )}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <Badge variant="outline" className="text-xs">{TYPE_LABEL[reward.type] ?? reward.type}</Badge>
+              {reward.tokenAmount && <Badge variant="secondary" className="text-xs">+{reward.tokenAmount} FDY</Badge>}
             </div>
-            
-            {isConnected ? (
-              <Button variant="outline" size="sm" onClick={disconnect}>
-                Disconnect
+            {reward.status === 'minted' && (
+              <Button size="sm" className="w-full" onClick={handleClaim} disabled={claiming || !isLoggedIn}>
+                {claiming ? <><Loader2 className="w-3 h-3 animate-spin mr-1" />Claiming...</>
+                  : !isLoggedIn ? <><Lock className="w-3 h-3 mr-1" />Login to Claim</>
+                  : <><Zap className="w-3 h-3 mr-1" />Claim Reward</>}
               </Button>
-            ) : (
-              <Button 
-                onClick={connect} 
-                disabled={isConnecting || !isMetaMaskInstalled} 
-                className="gap-2"
-              >
-                {isConnecting && <Loader2 className="w-4 h-4 animate-spin" />}
-                {isMetaMaskInstalled ? 'Connect MetaMask' : 'Install MetaMask'}
-              </Button>
+            )}
+            {reward.status === 'claimed' && (
+              <p className="text-center text-xs text-emerald-600 font-medium py-1 flex items-center justify-center gap-1">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                {reward.claimedAt ? `Claimed ${new Date(reward.claimedAt).toLocaleDateString()}` : 'Claimed'}
+              </p>
+            )}
+            {reward.status === 'pending' && (
+              <p className="text-center text-xs text-amber-600 font-medium py-1 flex items-center justify-center gap-1">
+                <Clock className="w-3.5 h-3.5" />Awaiting mint...
+              </p>
             )}
           </CardContent>
         </Card>
+      </motion.div>
 
-        {/* Pending rewards notification */}
-        {pendingCount > 0 && (
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm">
-            <p className="font-semibold text-amber-800 flex items-center gap-2">
-              <Clock className="w-4 h-4" /> 
-              {pendingCount} reward{pendingCount !== 1 ? 's' : ''} pending
-            </p>
-            <p className="text-amber-700 mt-1 text-xs">
-              Status will update automatically once confirmed on-chain.
-            </p>
+      {/* Detail + Share Dialog */}
+      <Dialog open={showDetail} onOpenChange={setShowDetail}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{reward.name}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className={`h-40 rounded-xl flex items-center justify-center ${bgColor}`}>
+              {reward.imageUrl
+                ? <img src={reward.imageUrl} alt={reward.name} className="h-full w-full object-contain rounded-xl" />
+                : <div className="p-6 rounded-full bg-white/60"><Icon className={`w-16 h-16 ${iconColor}`} /></div>
+              }
+            </div>
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Badge variant="outline">{TYPE_LABEL[reward.type] ?? reward.type}</Badge>
+                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${STATUS_COLOR[reward.status] ?? ''}`}>
+                  {reward.status === 'minted' ? 'Ready to Claim' : reward.status}
+                </span>
+              </div>
+              <p className="text-sm text-muted-foreground">{reward.description || 'No description.'}</p>
+              <p className="text-xs text-muted-foreground">
+                Campaign: <span className="font-medium text-foreground">{reward.campaignTitle}</span>
+              </p>
+              {reward.tokenAmount && <p className="text-sm font-semibold text-primary">+{reward.tokenAmount} FDY tokens</p>}
+              {reward.claimedAt && (
+                <p className="text-xs text-muted-foreground">
+                  Claimed on {new Date(reward.claimedAt).toLocaleDateString()}
+                </p>
+              )}
+            </div>
+
+            {/* Share preview */}
+            {(reward.status === 'claimed' || reward.status === 'minted') && (
+              <div className="p-3 bg-muted/50 rounded-lg text-xs text-muted-foreground whitespace-pre-line font-mono">
+                {`🎖️ I earned "${reward.name}" on Fundy!\nI donated to "${reward.campaignTitle}".${userName ? `\n— ${userName}` : ''}`}
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              {reward.status === 'minted' && (
+                <Button className="flex-1" onClick={handleClaim} disabled={claiming || !isLoggedIn}>
+                  {claiming ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Zap className="w-4 h-4 mr-2" />}
+                  Claim
+                </Button>
+              )}
+              {(reward.status === 'claimed' || reward.status === 'minted') && (
+                <Button variant="outline" className="flex-1" onClick={handleShare}>
+                  <Share2 className="w-4 h-4 mr-2" /> Share
+                </Button>
+              )}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+// ── Main ──────────────────────────────────────────────────────
+export default function Rewards() {
+  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
+  const { rewards, creditScore, isLoading, claimReward } = useRewards(user?.id);
+  const { isConnected, address, fdyBalance, ethBalance, connect } = useWeb3();
+  const navigate = useNavigate();
+
+  if (authLoading) {
+    return <div className="min-h-[60vh] flex items-center justify-center"><Loader2 className="w-10 h-10 animate-spin text-primary" /></div>;
+  }
+
+  const pendingCount = rewards.filter(r => r.status === 'pending').length;
+  const mintedCount  = rewards.filter(r => r.status === 'minted').length;
+  const claimedCount = rewards.filter(r => r.status === 'claimed').length;
+
+  return (
+    <div className="max-w-4xl mx-auto px-4 py-10">
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+        {/* Header */}
+        <div>
+          <h1 className="text-3xl font-extrabold tracking-tight mb-2 flex items-center gap-2">
+            <Gift className="w-8 h-8 text-primary" /> Rewards
+          </h1>
+          <p className="text-muted-foreground">
+            Every donation earns FDY tokens and on-chain rewards.
+            {!isAuthenticated && ' Log in to claim yours.'}
+          </p>
+        </div>
+
+        {/* Login prompt — soft banner */}
+        {!isAuthenticated && (
+          <Card className="border-primary/20 bg-primary/5">
+            <CardContent className="flex items-center justify-between gap-4 py-4">
+              <div className="flex items-center gap-3">
+                <Lock className="w-5 h-5 text-primary shrink-0" />
+                <div>
+                  <p className="font-semibold text-sm">Log in to claim your rewards</p>
+                  <p className="text-xs text-muted-foreground">Browse rewards below — claiming requires an account.</p>
+                </div>
+              </div>
+              <Button size="sm" onClick={() => navigate(ROUTE_PATHS.LOGIN)}>Log In</Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Wallet banner */}
+        <Card className={`border-2 ${isConnected ? 'border-emerald-200 bg-emerald-50/40' : 'border-primary/20'}`}>
+          <CardContent className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 py-4">
+            {isConnected ? (
+              <div>
+                <p className="font-semibold text-emerald-700 flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4" /> Wallet connected
+                </p>
+                <p className="font-mono text-xs text-muted-foreground mt-0.5">{address?.slice(0,10)}...{address?.slice(-6)}</p>
+                <p className="text-sm mt-1 font-semibold">{ethBalance} ETH · <span className="text-primary">{Number(fdyBalance).toFixed(2)} FDY</span></p>
+              </div>
+            ) : (
+              <div>
+                <p className="font-semibold">Connect your MetaMask wallet</p>
+                <p className="text-sm text-muted-foreground mt-0.5">Required to mint and claim on-chain rewards.</p>
+              </div>
+            )}
+            {!isConnected && <Button onClick={connect} className="gap-2 shrink-0">🦊 Connect MetaMask</Button>}
+          </CardContent>
+        </Card>
+
+        {/* Credit score */}
+        {isAuthenticated && creditScore && <CreditScoreCard score={creditScore} />}
+
+        {/* Stats */}
+        {isAuthenticated && rewards.length > 0 && (
+          <div className="grid grid-cols-3 gap-4">
+            {[
+              { label: 'Pending', value: pendingCount, color: 'text-amber-600' },
+              { label: 'Ready to Claim', value: mintedCount, color: 'text-blue-600' },
+              { label: 'Claimed', value: claimedCount, color: 'text-emerald-600' },
+            ].map(({ label, value, color }) => (
+              <Card key={label}>
+                <CardContent className="py-4 text-center">
+                  <p className={`text-2xl font-extrabold ${color}`}>{value}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{label}</p>
+                </CardContent>
+              </Card>
+            ))}
           </div>
         )}
 
-        {/* Main grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Credit score sidebar */}
-          <div className="lg:col-span-1 space-y-4">
-            {creditScore ? (
-              <CreditScoreCard score={creditScore} />
-            ) : (
-              <Card className="flex items-center justify-center h-64">
-                <Loader2 className="w-6 h-6 animate-spin text-primary" />
-              </Card>
-            )}
-          </div>
+        {/* Rewards grid */}
+        <div>
+          <h2 className="font-bold text-lg mb-4">
+            {isAuthenticated ? 'My Rewards' : 'How Rewards Work'}
+          </h2>
 
-          {/* Rewards list */}
-          <div className="lg:col-span-2 space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="font-bold text-lg">My rewards</h2>
-              <Badge variant="secondary">
-                {rewards.length} item{rewards.length !== 1 ? 's' : ''}
-              </Badge>
+          {!isAuthenticated ? (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {[
+                { icon: Coins,     title: 'Token Reward',    desc: 'Earn FDY tokens for every donation. 1 ETH = 100 FDY.' },
+                { icon: ImageIcon, title: 'NFT Collectible', desc: 'Large donations mint a unique NFT commemorating your support.' },
+                { icon: Gift,      title: 'Badge',           desc: 'Digital badges for reaching donation milestones.' },
+              ].map(({ icon: Icon, title, desc }) => (
+                <Card key={title} className="border-dashed">
+                  <CardContent className="p-5 text-center space-y-2">
+                    <div className="inline-flex p-3 bg-muted rounded-full">
+                      <Icon className="w-6 h-6 text-muted-foreground" />
+                    </div>
+                    <p className="font-semibold text-sm">{title}</p>
+                    <p className="text-xs text-muted-foreground">{desc}</p>
+                  </CardContent>
+                </Card>
+              ))}
             </div>
-
-            {isLoading ? (
-              <div className="flex justify-center py-12">
-                <Loader2 className="w-8 h-8 animate-spin text-primary" />
-              </div>
-            ) : rewards.length === 0 ? (
-              <EmptyRewardsState onNavigate={() => navigate(ROUTE_PATHS.CAMPAIGNS)} />
-            ) : (
-              rewards.map((reward) => (
-                <RewardCard 
-                  key={reward.id} 
-                  reward={reward} 
-                  onClaim={claimReward} 
+          ) : isLoading ? (
+            <div className="flex justify-center py-16">
+              <Loader2 className="w-8 h-8 animate-spin text-primary" />
+            </div>
+          ) : rewards.length === 0 ? (
+            <Card className="border-dashed">
+              <CardContent className="py-16 text-center space-y-3 text-muted-foreground">
+                <div className="inline-flex p-4 bg-muted rounded-full">
+                  <Gift className="w-10 h-10 opacity-30" />
+                </div>
+                <p className="font-medium text-lg">No rewards yet</p>
+                <p className="text-sm">Make your first donation to earn FDY tokens and rewards!</p>
+                <Button variant="outline" onClick={() => navigate(ROUTE_PATHS.CAMPAIGNS)}>
+                  Browse Campaigns
+                </Button>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+              {rewards.map((reward) => (
+                <RewardCard
+                  key={reward.id}
+                  reward={reward}
+                  onClaim={claimReward}
+                  isLoggedIn={isAuthenticated}
+                  userName={user?.name}
                 />
-              ))
-            )}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       </motion.div>
     </div>

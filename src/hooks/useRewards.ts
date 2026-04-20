@@ -87,7 +87,7 @@ export function useRewards(userId: string | undefined) {
       .finally(() => setIsLoading(false));
   }, [userId]);
 
-  // Claim reward — write to DB and update local state
+  // Claim reward — write to DB and update local state optimistically
   const claimReward = useCallback(async (rewardId: string) => {
     const claimedAt = new Date().toISOString();
 
@@ -112,6 +112,7 @@ export function useRewards(userId: string | undefined) {
           r.id === rewardId ? { ...r, status: 'minted' as RewardStatus, claimedAt: undefined } : r
         )
       );
+      throw error;
     }
   }, []);
 

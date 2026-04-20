@@ -32,7 +32,7 @@ const queryClient = new QueryClient({
 function AppWithWeb3() {
   const { user } = useAuth();
   return (
-    <Web3Provider userId={user?.id}>
+    <Web3Provider userId={user?.id} boundWalletAddress={user?.walletAddress}>
       <Layout>
         <Routes>
           <Route path={ROUTE_PATHS.HOME}            element={<Home />} />

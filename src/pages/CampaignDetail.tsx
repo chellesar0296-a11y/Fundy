@@ -25,6 +25,7 @@ import { getCampaignUpdates, submitReport } from '@/lib/supabase';
 import { useAuth } from '@/hooks/useAuth';
 import { useWeb3, CROWDFUNDING_ABI, CONTRACT_ADDRESSES } from '@/context/Web3Context';
 import { ethers } from 'ethers';
+import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
 import { ProgressBar } from '@/components/ProgressBar';
 import { SocialShare } from '@/components/SocialShare';
@@ -63,30 +64,77 @@ export default function CampaignDetail() {
     }
   }, [id]);
 
-  // Fetch on-chain donors when campaign.onChainId is available
+  // Fetch on-chain donors — retry up to 3 times, look up Supabase names
   useEffect(() => {
     if (!campaign?.onChainId || !provider) return;
-    const contract = new ethers.Contract(CONTRACT_ADDRESSES.crowdfunding, CROWDFUNDING_ABI, provider);
-    const filter   = contract.filters.DonationReceived(campaign.onChainId);
-    contract.queryFilter(filter, 0, 'latest')
-      .then(async (events: any[]) => {
+
+    let cancelled = false;
+    const fetchDonors = async (attempt = 0) => {
+      try {
+        const contract = new ethers.Contract(
+          CONTRACT_ADDRESSES.crowdfunding,
+          CROWDFUNDING_ABI,
+          provider,
+        );
+        const filter = contract.filters.DonationReceived(campaign.onChainId);
+        const events = await contract.queryFilter(filter, 0, 'latest');
+        if (cancelled) return;
+
         const seen = new Set<string>();
         const donors = await Promise.all(
-          events.map(async (e) => {
+          events.map(async (e: any) => {
             if (seen.has(e.args.donor)) return null;
             seen.add(e.args.donor);
-            const block = await provider.getBlock(e.blockNumber);
+            let date: Date | null = null;
+            try {
+              const block = await provider.getBlock(e.blockNumber);
+              if (block) date = new Date(Number(block.timestamp) * 1000);
+            } catch {}
             return {
               address:  e.args.donor as string,
               amount:   ethers.formatEther(e.args.amount),
               amountRm: (Number(ethers.formatEther(e.args.amount)) / 0.001).toFixed(0),
-              date:     block ? new Date(Number(block.timestamp) * 1000) : null,
+              date,
+              txHash:   e.transactionHash,
+              name:     null as string | null, // will be filled below
             };
-          })
+          }),
         );
-        setOnChainDonors(donors.filter(Boolean).reverse());
-      })
-      .catch(() => setOnChainDonors([]));
+
+        const filtered = donors.filter(Boolean) as any[];
+
+        // Look up Supabase usernames for wallets that are bound
+        if (filtered.length > 0) {
+          try {
+            const { supabase } = await import('@/lib/supabase');
+            const addresses = filtered.map(d => d.address.toLowerCase());
+            const { data } = await supabase
+              .from('profiles')
+              .select('name, wallet_address')
+              .in('wallet_address', addresses);
+
+            if (data) {
+              const nameMap: Record<string, string> = {};
+              data.forEach((p: any) => {
+                if (p.wallet_address) nameMap[p.wallet_address.toLowerCase()] = p.name;
+              });
+              filtered.forEach(d => {
+                d.name = nameMap[d.address.toLowerCase()] ?? null;
+              });
+            }
+          } catch {}
+        }
+
+        if (!cancelled) setOnChainDonors(filtered.reverse());
+      } catch (err) {
+        if (!cancelled && attempt < 3) {
+          setTimeout(() => fetchDonors(attempt + 1), 1500);
+        }
+      }
+    };
+
+    fetchDonors();
+    return () => { cancelled = true; };
   }, [campaign?.onChainId, provider]);
 
   if (isLoading) {
@@ -368,6 +416,13 @@ export default function CampaignDetail() {
                             <p className="text-xs text-muted-foreground mb-2">Posted by {update.author_name}</p>
                           )}
                           <p className="text-sm leading-relaxed whitespace-pre-wrap text-foreground/80">{update.content}</p>
+                          {update.image_url && (
+                            <img
+                              src={update.image_url}
+                              alt={update.title}
+                              className="mt-3 rounded-xl w-full max-h-56 object-contain border bg-muted/20"
+                            />
+                          )}
                         </motion.div>
                       ))}
                     </div>
@@ -396,7 +451,13 @@ export default function CampaignDetail() {
                       <Button
                         size="lg"
                         className="w-full h-14 text-lg font-bold shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-all"
-                        onClick={() => setIsDonationOpen(true)}
+                        onClick={() => {
+                          if (!user) {
+                            toast.error('Please log in to donate.');
+                            return;
+                          }
+                          setIsDonationOpen(true);
+                        }}
                       >
                         <Heart className="mr-2 w-5 h-5 fill-current" />
                         {t('btn_donate')}
@@ -445,7 +506,9 @@ export default function CampaignDetail() {
                   <h4 className="font-bold mb-4">
                     Recent Support
                     {onChainDonors.length > 0 && (
-                      <span className="ml-2 text-xs font-normal text-muted-foreground">({onChainDonors.length} donors)</span>
+                      <span className="ml-2 text-xs font-normal text-muted-foreground">
+                        ({onChainDonors.length} donors)
+                      </span>
                     )}
                   </h4>
                   {onChainDonors.length === 0 ? (
@@ -464,8 +527,9 @@ export default function CampaignDetail() {
                             {i + 1}
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold font-mono truncate">
-                              {donor.address.slice(0, 8)}...{donor.address.slice(-4)}
+                            {/* Show donor name if they have a Supabase account, else Anonymous */}
+                            <p className="text-sm font-semibold">
+                              {donor.name ?? 'Anonymous'}
                             </p>
                             <p className="text-xs text-muted-foreground">
                               RM{donor.amountRm} · {donor.date ? donor.date.toLocaleDateString() : '—'}

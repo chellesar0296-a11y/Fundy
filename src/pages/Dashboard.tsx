@@ -117,37 +117,62 @@ export default function Dashboard() {
       .finally(() => setRewardsLoading(false));
   }, [user?.id]);
 
-  // Fetch on-chain donation events for connected wallet
+  // Fetch on-chain transactions for connected wallet (with retry)
   useEffect(() => {
     if (!isConnected || !address || !provider) return;
     if (CONTRACT_ADDRESSES.crowdfunding === '0x0000000000000000000000000000000000000000') return;
 
+    let cancelled = false;
     setOnChainLoading(true);
-    const contract = new ethers.Contract(CONTRACT_ADDRESSES.crowdfunding, CROWDFUNDING_ABI, provider);
 
-    // Query DonationReceived events where donor = connected address
-    const filter = contract.filters.DonationReceived(null, address);
-    contract.queryFilter(filter, 0, 'latest')
-      .then(async (events) => {
-        const txs = await Promise.all(events.map(async (e: any) => {
-          const block = await provider.getBlock(e.blockNumber);
-          return {
-            txHash:     e.transactionHash,
-            campaignId: Number(e.args.campaignId),
-            amount:     ethers.formatEther(e.args.amount),
-            amountRm:   (Number(ethers.formatEther(e.args.amount)) / 0.001).toFixed(2),
-            tokens:     ethers.formatEther(e.args.tokensAwarded),
-            timestamp:  block ? new Date(Number(block.timestamp) * 1000) : null,
-          };
+    const fetchTxs = async (attempt = 0) => {
+      try {
+        const contract = new ethers.Contract(CONTRACT_ADDRESSES.crowdfunding, CROWDFUNDING_ABI, provider);
+
+        // My donations (as donor)
+        const donorFilter = contract.filters.DonationReceived(null, address);
+        const donorEvents = await contract.queryFilter(donorFilter, 0, 'latest');
+
+        const txs = await Promise.all(donorEvents.map(async (e: any) => {
+          try {
+            const block = await provider.getBlock(e.blockNumber);
+            return {
+              type:       'donated',
+              txHash:     e.transactionHash,
+              campaignId: Number(e.args.campaignId),
+              amount:     ethers.formatEther(e.args.amount),
+              amountRm:   (Number(ethers.formatEther(e.args.amount)) / 0.001).toFixed(2),
+              tokens:     ethers.formatEther(e.args.tokensAwarded),
+              timestamp:  block ? new Date(Number(block.timestamp) * 1000) : null,
+            };
+          } catch {
+            return {
+              type:       'donated',
+              txHash:     e.transactionHash,
+              campaignId: Number(e.args.campaignId),
+              amount:     ethers.formatEther(e.args.amount),
+              amountRm:   (Number(ethers.formatEther(e.args.amount)) / 0.001).toFixed(2),
+              tokens:     '0',
+              timestamp:  null,
+            };
+          }
         }));
-        // Sort newest first
-        setOnChainTxs(txs.reverse());
-      })
-      .catch((err) => {
-        console.error('[on-chain txs]', err);
-        setOnChainTxs([]);
-      })
-      .finally(() => setOnChainLoading(false));
+
+        if (!cancelled) {
+          setOnChainTxs(txs.reverse());
+          setOnChainLoading(false);
+        }
+      } catch (err) {
+        if (!cancelled && attempt < 3) {
+          setTimeout(() => fetchTxs(attempt + 1), 1500);
+        } else if (!cancelled) {
+          setOnChainLoading(false);
+        }
+      }
+    };
+
+    fetchTxs();
+    return () => { cancelled = true; };
   }, [isConnected, address, provider]);
 
   // Early returns AFTER all hooks
@@ -552,75 +577,116 @@ export default function Dashboard() {
                 key="history"
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="bg-card border rounded-xl overflow-hidden"
+                className="space-y-6"
               >
-                <div className="p-6 border-b bg-muted/20 flex items-start justify-between gap-4">
-                  <div>
-                    <h3 className="text-xl font-bold">Transaction History</h3>
-                    <p className="text-sm text-muted-foreground">On-chain donation records from the smart contract.</p>
+                {/* Wallet info bar */}
+                {isConnected && (
+                  <div className="flex items-center justify-between p-4 bg-primary/5 border border-primary/20 rounded-xl">
+                    <div className="flex items-center gap-3">
+                      <span className="text-xl">🦊</span>
+                      <div>
+                        <p className="text-sm font-semibold">Connected Wallet</p>
+                        <p className="font-mono text-xs text-muted-foreground">{address}</p>
+                      </div>
+                    </div>
+                    <div className="text-right text-sm">
+                      <p className="font-bold">{ethBalance} ETH</p>
+                      <p className="text-primary font-semibold">{Number(fdyBalance).toFixed(0)} FDY</p>
+                    </div>
                   </div>
-                  {isConnected && (
-                    <div className="text-right shrink-0">
-                      <p className="text-xs text-muted-foreground">Wallet</p>
-                      <p className="font-mono text-xs font-semibold">{address?.slice(0,8)}...{address?.slice(-4)}</p>
-                      <p className="text-xs text-primary mt-0.5">{ethBalance} ETH · {Number(fdyBalance).toFixed(0)} FDY</p>
+                )}
+
+                {/* My Donations — what I sent to campaigns */}
+                <div className="bg-card border rounded-xl overflow-hidden">
+                  <div className="p-5 border-b bg-muted/20">
+                    <h3 className="font-bold text-lg flex items-center gap-2">
+                      <Heart className="w-4 h-4 text-primary" /> My Donations
+                    </h3>
+                    <p className="text-sm text-muted-foreground">Contributions you made to campaigns, recorded on-chain.</p>
+                  </div>
+
+                  {!isConnected ? (
+                    <div className="text-center py-12 text-muted-foreground space-y-2">
+                      <div className="text-3xl">🦊</div>
+                      <p className="font-medium">Connect your wallet to view donation history</p>
+                    </div>
+                  ) : onChainLoading ? (
+                    <div className="flex justify-center py-10">
+                      <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                    </div>
+                  ) : onChainTxs.length === 0 ? (
+                    <div className="text-center py-12 text-muted-foreground">
+                      <p className="font-medium mb-1">No donations yet</p>
+                      <p className="text-sm">Donations made with MetaMask will appear here.</p>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-muted/40 text-muted-foreground border-b">
+                          <tr>
+                            <th className="px-5 py-3 text-left font-medium">Date</th>
+                            <th className="px-5 py-3 text-left font-medium">Campaign #</th>
+                            <th className="px-5 py-3 text-left font-medium">Amount</th>
+                            <th className="px-5 py-3 text-left font-medium">FDY Earned</th>
+                            <th className="px-5 py-3 text-left font-medium">Tx Hash</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y">
+                          {onChainTxs.map((tx) => (
+                            <tr key={tx.txHash} className="hover:bg-muted/30 transition-colors">
+                              <td className="px-5 py-3 whitespace-nowrap text-muted-foreground">
+                                {tx.timestamp ? tx.timestamp.toLocaleDateString() : '—'}
+                              </td>
+                              <td className="px-5 py-3 font-medium">Campaign #{tx.campaignId}</td>
+                              <td className="px-5 py-3">
+                                <span className="font-semibold">RM{tx.amountRm}</span>
+                                <span className="text-xs text-muted-foreground ml-1">({Number(tx.amount).toFixed(5)} ETH)</span>
+                              </td>
+                              <td className="px-5 py-3">
+                                <span className="text-primary font-semibold">+{Number(tx.tokens).toFixed(2)} FDY</span>
+                              </td>
+                              <td className="px-5 py-3">
+                                <span className="font-mono text-xs text-muted-foreground" title={tx.txHash}>
+                                  {tx.txHash.slice(0, 10)}...{tx.txHash.slice(-6)}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   )}
                 </div>
 
-                {!isConnected ? (
-                  <div className="text-center py-16 text-muted-foreground space-y-3">
-                    <div className="text-4xl">🦊</div>
-                    <p className="font-medium">Connect your wallet to view on-chain transactions</p>
-                    <p className="text-sm">Your MetaMask wallet address is needed to look up your donation records on the blockchain.</p>
-                  </div>
-                ) : onChainLoading ? (
-                  <div className="flex justify-center py-12">
-                    <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                  </div>
-                ) : onChainTxs.length === 0 ? (
-                  <div className="text-center py-16 text-muted-foreground">
-                    <p className="text-lg font-medium mb-2">No on-chain donations yet</p>
-                    <p className="text-sm">Donations made through MetaMask will appear here.</p>
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm text-left">
-                      <thead className="bg-muted/50 text-muted-foreground font-medium border-b">
-                        <tr>
-                          <th className="px-6 py-4">Date</th>
-                          <th className="px-6 py-4">Campaign ID</th>
-                          <th className="px-6 py-4">Amount (RM)</th>
-                          <th className="px-6 py-4">Amount (ETH)</th>
-                          <th className="px-6 py-4">FDY Earned</th>
-                          <th className="px-6 py-4">Tx Hash</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y">
-                        {onChainTxs.map((tx) => (
-                          <tr key={tx.txHash} className="hover:bg-muted/30 transition-colors">
-                            <td className="px-6 py-4 whitespace-nowrap">
-                              {tx.timestamp ? tx.timestamp.toLocaleDateString() : '—'}
-                            </td>
-                            <td className="px-6 py-4 text-muted-foreground">#{tx.campaignId}</td>
-                            <td className="px-6 py-4 font-semibold">RM{tx.amountRm}</td>
-                            <td className="px-6 py-4 text-muted-foreground">{Number(tx.amount).toFixed(6)} ETH</td>
-                            <td className="px-6 py-4">
-                              <span className="text-primary font-medium">+{Number(tx.tokens).toFixed(2)} FDY</span>
-                            </td>
-                            <td className="px-6 py-4">
-                              <a
-                                href={`#`}
-                                className="font-mono text-xs text-primary hover:underline"
-                                title={tx.txHash}
-                              >
-                                {tx.txHash.slice(0, 10)}...{tx.txHash.slice(-6)}
-                              </a>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                {/* Campaigns I organised — donations received */}
+                {userCampaigns.length > 0 && (
+                  <div className="bg-card border rounded-xl overflow-hidden">
+                    <div className="p-5 border-b bg-muted/20">
+                      <h3 className="font-bold text-lg flex items-center gap-2">
+                        <Megaphone className="w-4 h-4 text-primary" /> Donations Received
+                      </h3>
+                      <p className="text-sm text-muted-foreground">Contributions received by your campaigns.</p>
+                    </div>
+                    <div className="divide-y">
+                      {userCampaigns.filter(c => c.donorCount > 0).length === 0 ? (
+                        <div className="text-center py-10 text-muted-foreground">
+                          <p className="text-sm">No donations received yet on your campaigns.</p>
+                        </div>
+                      ) : (
+                        userCampaigns.filter(c => c.donorCount > 0).map((campaign) => (
+                          <div key={campaign.id} className="p-4 flex items-center justify-between gap-4">
+                            <div className="min-w-0">
+                              <p className="font-semibold text-sm line-clamp-1">{campaign.title}</p>
+                              <p className="text-xs text-muted-foreground mt-0.5">{campaign.donorCount} donors</p>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <p className="font-bold text-emerald-600">RM{campaign.currentAmount.toLocaleString()}</p>
+                              <p className="text-xs text-muted-foreground">of RM{campaign.goalAmount.toLocaleString()}</p>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
                   </div>
                 )}
               </motion.div>
