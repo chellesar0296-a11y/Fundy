@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import { createCampaign, supabase } from '@/lib/supabase';
 import { useWeb3 } from '@/context/Web3Context';
 import { useAuth } from '@/hooks/useAuth';
-import { ROUTE_PATHS, RewardType } from '@/lib/index';
+import { ROUTE_PATHS } from '@/lib/index';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -17,9 +17,8 @@ import { Separator } from '@/components/ui/separator';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
-  ImageIcon, Loader2, ArrowLeft, Info, ShieldCheck, ShieldAlert,
-  Plus, Trash2, Gift, Coins, Image as NftIcon, Package,
-  ChevronDown, ChevronUp, Sparkles,
+  ImageIcon, Loader2, ArrowLeft, Info, ShieldCheck, ShieldAlert, Sparkles, Plus,
+  Trash2, Gift, Coins, Image as NftIcon, ChevronDown, ChevronUp,
 } from 'lucide-react';
 
 // ─── Constants ────────────────────────────────────────────────
@@ -31,37 +30,6 @@ const CATEGORIES = [
   // Creative & innovation
   'Creative', 'Technology', 'Business',
 ] as const;
-
-const REWARD_TYPE_META: Record<RewardType, { label: string; icon: React.ElementType; desc: string; color: string }> = {
-  ERC20:    { label: 'Token Reward',    icon: Coins,    desc: 'Distribute fungible tokens to supporters',        color: 'text-blue-600 bg-blue-50 border-blue-200' },
-  ERC721:   { label: 'NFT Collectible', icon: NftIcon,  desc: 'Mint a unique NFT collectible for each backer',   color: 'text-violet-600 bg-violet-50 border-violet-200' },
-  badge:    { label: 'Badge',           icon: Gift,     desc: 'A digital badge issued automatically on-chain',   color: 'text-amber-600 bg-amber-50 border-amber-200' },
-  physical: { label: 'Physical Item',   icon: Package,  desc: 'A real item you will ship to the supporter',      color: 'text-emerald-600 bg-emerald-50 border-emerald-200' },
-};
-
-// ─── Reward tier type ─────────────────────────────────────────
-interface RewardTier {
-  id: string;
-  minAmount: number;
-  type: RewardType;
-  name: string;
-  description: string;
-  quantity: number | null;
-  tokenAmount: number | null;
-}
-
-function emptyTier(defaults?: Partial<RewardTier>): RewardTier {
-  return {
-    id: Math.random().toString(36).slice(2),
-    minAmount: 25,
-    type: 'badge',
-    name: '',
-    description: '',
-    quantity: null,
-    tokenAmount: null,
-    ...defaults,
-  };
-}
 
 // ─── Zod schema ───────────────────────────────────────────────
 const schema = z.object({
@@ -196,21 +164,21 @@ function TierEditor({ tier, index, onUpdate, onRemove }: {
 export default function CreateCampaign() {
   const navigate = useNavigate();
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
-  const { isConnected, connect, createCampaignOnChain } = useWeb3();
+  const { isConnected, connect, createCampaignOnChain, approveExtraFdy } = useWeb3();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [previewUrl, setPreviewUrl] = useState('');
-  const [tiers, setTiers] = useState<RewardTier[]>([
-    emptyTier({ minAmount: 20, type: 'badge', name: 'Supporter Badge', description: 'A digital badge to thank you for backing this campaign.' }),
-  ]);
+
+  // ── On-chain reward config ────────────────────────────────
+  const [nftUri,           setNftUri]           = useState('');
+  const [extraFdyAmount,   setExtraFdyAmount]   = useState('');
+  const [extraFdyMinRm,    setExtraFdyMinRm]    = useState('');
+  const [extraFdyBudget,   setExtraFdyBudget]   = useState('');
+  const [showRewardConfig, setShowRewardConfig] = useState(false);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: { title: '', short_description: '', description: '', category: 'Personal', goal_amount: 5000, end_date: '', image_url: '' },
   });
-
-  const addTier = () => setTiers((p) => [...p, emptyTier()]);
-  const updateTier = (id: string, updated: RewardTier) => setTiers((p) => p.map((t) => t.id === id ? updated : t));
-  const removeTier = (id: string) => setTiers((p) => p.filter((t) => t.id !== id));
 
   if (authLoading) return (
     <div className="min-h-[80vh] flex items-center justify-center">
@@ -222,87 +190,58 @@ export default function CreateCampaign() {
     <div className="min-h-[80vh] flex flex-col items-center justify-center p-6 text-center">
       <div className="bg-accent/20 p-6 rounded-full mb-6"><ShieldCheck className="w-16 h-16 text-primary" /></div>
       <h2 className="text-3xl font-bold mb-4">Sign in to Start a Campaign</h2>
-      <p className="text-muted-foreground max-w-md mb-8">Create a free account to launch your fundraising campaign and start making an impact.</p>
+      <p className="text-muted-foreground max-w-md mb-8">Create a free account to launch your fundraising campaign.</p>
       <Button onClick={() => navigate(ROUTE_PATHS.HOME)} size="lg">Back to Home</Button>
     </div>
   );
 
   async function onSubmit(values: FormValues) {
     if (!user) return;
-    if (!isConnected) {
-      toast.error('Please connect your MetaMask wallet first to create a campaign on-chain.');
-      return;
-    }
-    const invalid = tiers.find((t) => !t.name.trim());
-    if (invalid) { toast.error('Every reward tier needs a name.'); return; }
+    if (!isConnected) { toast.error('Please connect your MetaMask wallet first.'); return; }
     setIsSubmitting(true);
     try {
       const slug = slugify(values.title) + '-' + Date.now().toString(36);
-
-      // 1. Create in Supabase first
       const campaign = await createCampaign({
         title: values.title, slug,
-        description: values.description,
-        short_description: values.short_description,
-        category: values.category,
-        goal_amount: values.goal_amount,
+        description: values.description, short_description: values.short_description,
+        category: values.category, goal_amount: values.goal_amount,
         image_url: values.image_url || undefined,
         end_date: new Date(values.end_date).toISOString(),
         organizer_id: user.id,
       });
 
-      // 2. Register on-chain via MetaMask
+      // If offering extra FDY — approve budget from organizer wallet first
+      if (extraFdyAmount && extraFdyBudget) {
+        try {
+          toast.info('Step 1/2: Approving FDY budget...');
+          await approveExtraFdy(extraFdyBudget);
+        } catch (e: any) {
+          if (e?.code === 4001) { toast.error('FDY approval cancelled.'); setIsSubmitting(false); return; }
+          toast.warning('FDY approval failed — extra token reward disabled.');
+        }
+      }
+
+      // Register on-chain
       let onChainId: number | null = null;
       try {
-        toast.info('Please confirm the transaction in MetaMask...');
-        const goalEth = (values.goal_amount * 0.001).toFixed(6); // 1 RM = 0.001 ETH
-        const deadlineTs = Math.floor(new Date(values.end_date).getTime() / 1000);
-        onChainId = await createCampaignOnChain(campaign.id, goalEth, deadlineTs);
-
-        // 3. Save on_chain_id back to Supabase
-        await supabase
-          .from('campaigns')
-          .update({ on_chain_id: onChainId })
-          .eq('id', campaign.id);
-
-        toast.success(`Campaign registered on-chain! ID: ${onChainId}`);
+        toast.info(extraFdyAmount ? 'Step 2/2: Registering campaign on-chain...' : 'Confirm in MetaMask...');
+        const goalEth        = (values.goal_amount * 0.001).toFixed(6);
+        const deadlineTs     = Math.floor(new Date(values.end_date).getTime() / 1000);
+        const extraFdyWei    = extraFdyAmount || '0';
+        const extraMinEth    = extraFdyMinRm ? (Number(extraFdyMinRm) * 0.001).toFixed(6) : '0';
+        onChainId = await createCampaignOnChain(campaign.id, goalEth, deadlineTs, nftUri, extraFdyWei, extraMinEth);
+        await supabase.from('campaigns').update({ on_chain_id: onChainId }).eq('id', campaign.id);
+        toast.success(`Campaign live on-chain! ID: #${onChainId}`);
       } catch (chainErr: any) {
-        // Don't block — campaign exists in Supabase, just not on-chain yet
-        console.error('[on-chain] registration failed:', chainErr.message);
-        toast.warning('Campaign saved but on-chain registration failed. Donors will not be able to contribute until it is registered.');
+        if (chainErr?.code === 4001) { toast.error('Transaction cancelled.'); setIsSubmitting(false); return; }
+        toast.warning('Campaign saved but on-chain registration failed.');
       }
 
-      // 4. Save reward tiers
-      if (tiers.length > 0) {
-        const { error: tiersError } = await supabase
-          .from('reward_tiers')
-          .insert(
-            tiers.map((t) => ({
-              campaign_id: campaign.id,
-              name: t.name,
-              description: t.description,
-              min_amount: t.minAmount,
-              type: t.type,
-              quantity: t.quantity ?? null,
-              token_amount: t.tokenAmount ?? null,
-            })),
-          );
-        if (tiersError) console.error('[reward_tiers] insert error:', tiersError.message);
-      }
-
-      toast.success(`Campaign is live! ${tiers.length} reward tier${tiers.length !== 1 ? 's' : ''} configured.`);
       navigate(ROUTE_PATHS.CAMPAIGN_DETAIL.replace(':id', campaign.id));
     } catch (err: any) {
-      if (err?.code === 4001 || err?.message?.includes('user rejected')) {
-        toast.error('Transaction cancelled.');
-      } else {
-        toast.error(err.message ?? 'Failed to create campaign');
-      }
-    } finally {
-      setIsSubmitting(false);
-    }
+      toast.error(err.message ?? 'Failed to create campaign');
+    } finally { setIsSubmitting(false); }
   }
-
   const minDate = new Date();
   minDate.setDate(minDate.getDate() + 7);
   const minDateStr = minDate.toISOString().split('T')[0];
@@ -461,67 +400,105 @@ export default function CreateCampaign() {
                 </div>
               </div>
 
-              {/* ⑤ Reward Tiers */}
+              {/* ⑤ On-chain Rewards */}
               <div className="bg-card border-2 border-amber-200 rounded-2xl p-6 space-y-5">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <h3 className="font-bold text-lg flex items-center gap-2">
-                      <Sparkles className="w-5 h-5 text-amber-500" /> ⑤ Reward tiers
-                      <Badge className="text-[10px] bg-amber-100 text-amber-700 border-amber-200">P4</Badge>
+                      <Sparkles className="w-5 h-5 text-amber-500" /> ⑤ On-chain Rewards
                     </h3>
                     <p className="text-sm text-muted-foreground mt-0.5">
-                      Set donation thresholds and the on-chain rewards donors automatically receive
+                      Configure optional rewards for donors. All rewards are handled on-chain automatically.
                     </p>
                   </div>
-                  <Badge variant="secondary">{tiers.length} tier{tiers.length !== 1 ? 's' : ''}</Badge>
+                  <button type="button" onClick={() => setShowRewardConfig(v => !v)}
+                    className="text-xs text-primary font-semibold hover:underline">
+                    {showRewardConfig ? 'Hide' : 'Configure'}
+                  </button>
                 </div>
 
-                {/* Type legend */}
-                <div className="grid grid-cols-3 gap-2">
-                  {(Object.keys(REWARD_TYPE_META) as RewardType[]).map((t) => {
-                    const m = REWARD_TYPE_META[t];
-                    const Icon = m.icon;
-                    return (
-                      <div key={t} className={`flex items-center gap-1.5 px-2.5 py-2 rounded-lg border text-xs font-medium ${m.color}`}>
-                        <Icon className="w-3.5 h-3.5 shrink-0" /><span>{m.label}</span>
+                {/* Always-on: FDY base reward explanation */}
+                <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl text-sm space-y-1">
+                  <p className="font-semibold text-blue-800 flex items-center gap-2">
+                    🪙 Automatic FDY Token Reward <span className="text-xs font-normal">(always active)</span>
+                  </p>
+                  <p className="text-blue-700 text-xs">
+                    Every donor automatically receives FDY tokens: <strong>1 ETH donated = 100 FDY</strong>.
+                    FDY can only be used to donate on Fundy — it cannot be transferred outside the platform.
+                  </p>
+                </div>
+
+                {showRewardConfig && (
+                  <div className="space-y-5">
+                    {/* Extra FDY reward */}
+                    <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl space-y-3">
+                      <p className="font-semibold text-amber-900 flex items-center gap-2">
+                        🎁 Extra FDY Token Reward <span className="text-xs font-normal text-amber-700">(optional)</span>
+                      </p>
+                      <p className="text-xs text-amber-800">
+                        Offer <em>extra</em> FDY tokens from your own wallet for qualifying donations.
+                        <br />
+                        ⚠️ <strong>Cost to you:</strong> These FDY tokens are deducted from YOUR wallet balance.
+                        You must set a total budget and approve it before the campaign registers on-chain.
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className="space-y-1">
+                          <label className="text-xs font-semibold text-amber-900">Extra FDY per donation</label>
+                          <input type="number" min="0" placeholder="e.g. 500"
+                            value={extraFdyAmount} onChange={e => setExtraFdyAmount(e.target.value)}
+                            className="w-full px-3 py-2 text-sm border border-amber-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white" />
+                          <p className="text-[10px] text-amber-700">FDY tokens per qualifying donation</p>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs font-semibold text-amber-900">Min donation (RM)</label>
+                          <input type="number" min="0" placeholder="e.g. 50"
+                            value={extraFdyMinRm} onChange={e => setExtraFdyMinRm(e.target.value)}
+                            className="w-full px-3 py-2 text-sm border border-amber-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white" />
+                          <p className="text-[10px] text-amber-700">Minimum RM to qualify</p>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs font-semibold text-amber-900">Total FDY budget</label>
+                          <input type="number" min="0" placeholder="e.g. 50000"
+                            value={extraFdyBudget} onChange={e => setExtraFdyBudget(e.target.value)}
+                            className="w-full px-3 py-2 text-sm border border-amber-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white" />
+                          <p className="text-[10px] text-amber-700">Max total FDY you will spend</p>
+                        </div>
                       </div>
-                    );
-                  })}
-                </div>
+                    </div>
 
-                {/* Tier list */}
-                {tiers.length === 0 ? (
-                  <div className="border-2 border-dashed border-muted rounded-xl py-10 text-center text-muted-foreground">
-                    <Gift className="w-10 h-10 mx-auto mb-3 opacity-20" />
-                    <p className="font-medium">No reward tiers yet</p>
-                    <p className="text-sm">Add a tier below to incentivize donors</p>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    <AnimatePresence>
-                      {[...tiers].sort((a, b) => a.minAmount - b.minAmount).map((tier, i) => (
-                        <TierEditor key={tier.id} tier={tier} index={i}
-                          onUpdate={(u) => updateTier(tier.id, u)}
-                          onRemove={() => removeTier(tier.id)} />
-                      ))}
-                    </AnimatePresence>
+                    {/* NFT reward */}
+                    <div className="p-4 bg-violet-50 border border-violet-200 rounded-xl space-y-3">
+                      <p className="font-semibold text-violet-900 flex items-center gap-2">
+                        🖼️ NFT Reward for RM500+ Donors <span className="text-xs font-normal text-violet-700">(optional)</span>
+                      </p>
+                      <p className="text-xs text-violet-800">
+                        Donors who give <strong>RM500 or more</strong> will automatically receive a unique NFT.
+                        Provide an image URL or IPFS link for the NFT artwork.
+                        <br />
+                        ⚠️ The NFT image should be publicly accessible and permanent. Consider using IPFS (e.g. Pinata) for long-term storage.
+                        <br />
+                        Format accepted: <code className="bg-violet-100 px-1 rounded">https://...</code> or <code className="bg-violet-100 px-1 rounded">ipfs://Qm...</code>
+                      </p>
+                      <div className="space-y-1">
+                        <label className="text-xs font-semibold text-violet-900">NFT image / metadata URL</label>
+                        <input type="url" placeholder="https://your-image.com/nft.png  or  ipfs://Qm..."
+                          value={nftUri} onChange={e => setNftUri(e.target.value)}
+                          className="w-full px-3 py-2 text-sm border border-violet-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-400 bg-white" />
+                      </div>
+                      {nftUri && (
+                        <div className="flex items-start gap-3 p-2 bg-violet-100 rounded-lg">
+                          <img src={nftUri} alt="NFT preview"
+                            className="w-16 h-16 object-cover rounded-lg border border-violet-300"
+                            onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                          <p className="text-xs text-violet-700 break-all">{nftUri}</p>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
-
-                <Button type="button" variant="outline" className="w-full gap-2 border-dashed border-amber-300 text-amber-700 hover:bg-amber-50" onClick={addTier}>
-                  <Plus className="w-4 h-4" /> Add reward tier
-                </Button>
-
-                {/* Flow explanation */}
-                <div className="bg-amber-50/60 border border-amber-200 rounded-xl p-4 text-xs text-amber-900 space-y-1">
-                  <p className="font-semibold mb-1.5">📡 On-chain distribution flow</p>
-                  <p>① Donor completes payment → ② Smart contract records amount → ③ Best matching tier selected</p>
-                  <p>④ <strong>Badges & ERC-20</strong> are minted automatically → ⑤ <strong>ERC-721 NFTs</strong> are triggered via the Admin panel</p>
-                  <p>⑥ Physical rewards are flagged as "pending shipment" and fulfilled manually</p>
-                </div>
               </div>
 
-              {/* Info */}
+              {/* Info */}              {/* Info */}
               <div className="flex gap-3 p-4 rounded-xl bg-primary/5 border border-primary/20">
                 <Info className="w-5 h-5 text-primary shrink-0 mt-0.5" />
                 <p className="text-sm text-muted-foreground">

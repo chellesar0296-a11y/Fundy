@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Mail, Lock, User as UserIcon, ArrowRight, Loader2, Heart } from 'lucide-react';
+import { X, Mail, Lock, User as UserIcon, ArrowRight, Loader2, Heart, Wallet } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { toast } from 'sonner';
 import { useAuth } from '@/hooks/useAuth';
 import { useLanguage } from '@/hooks/useLanguage';
+import { useWeb3 } from '@/context/Web3Context';
+import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
@@ -43,23 +45,56 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login' }: AuthModalPr
     defaultValues: { name: '', email: '', password: '' },
   });
 
+  const { connect: connectWallet, isConnected, address } = useWeb3();
+
   async function onLogin(values: z.infer<typeof loginSchema>) {
     try {
       await login(values.email, values.password);
       toast.success('Welcome back!');
       onClose();
     } catch (error: any) {
-      toast.error(error.message || 'Login failed');
+      // Clean error message
+      const msg = error.message || 'Login failed';
+      if (msg.includes('Invalid login') || msg.includes('credentials')) {
+        toast.error('Incorrect email or password.');
+      } else {
+        toast.error(msg);
+      }
     }
   }
 
   async function onRegister(values: z.infer<typeof registerSchema>) {
     try {
+      // Check if email already exists
+      const { data: existing } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('email', values.email)
+        .maybeSingle();
+
+      if (existing) {
+        toast.error('This email is already registered. Please log in instead.');
+        setTab('login');
+        return;
+      }
+
+      // Require wallet connection before registering
+      if (!isConnected || !address) {
+        toast.error('Please connect your MetaMask wallet before creating an account.');
+        await connectWallet();
+        return;
+      }
+
       await register(values.name, values.email, values.password);
-      toast.success('Account created! Check your email to confirm.');
+      toast.success('Account created! Please check your email to confirm.');
       onClose();
     } catch (error: any) {
-      toast.error(error.message || 'Registration failed');
+      const msg = error.message || 'Registration failed';
+      if (msg.includes('already registered') || msg.includes('already exists')) {
+        toast.error('This email is already registered.');
+      } else {
+        toast.error(msg);
+      }
     }
   }
 
@@ -247,7 +282,32 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login' }: AuthModalPr
                               </FormItem>
                             )}
                           />
-                          <Button type="submit" className="w-full h-11 font-bold" disabled={isLoading}>
+
+                          {/* Wallet connect step */}
+                          <div className={`p-3 rounded-lg border text-sm ${isConnected ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'}`}>
+                            {isConnected ? (
+                              <div className="flex items-center gap-2 text-emerald-700">
+                                <span className="text-base">✅</span>
+                                <div>
+                                  <p className="font-semibold text-xs">Wallet connected</p>
+                                  <p className="font-mono text-xs">{address?.slice(0,10)}...{address?.slice(-6)}</p>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="space-y-2">
+                                <p className="text-amber-800 font-semibold text-xs flex items-center gap-1">
+                                  <Wallet className="w-3.5 h-3.5" /> MetaMask wallet required
+                                </p>
+                                <p className="text-amber-700 text-xs">Your wallet is permanently linked to this account.</p>
+                                <Button type="button" size="sm" variant="outline" onClick={connectWallet}
+                                  className="w-full border-amber-300 text-amber-800 hover:bg-amber-100">
+                                  🦊 Connect MetaMask
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+
+                          <Button type="submit" className="w-full h-11 font-bold" disabled={isLoading || !isConnected}>
                             {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : (
                               <>{t('btn_register')} <ArrowRight className="ml-2 w-4 h-4" /></>
                             )}

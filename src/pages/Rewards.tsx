@@ -1,5 +1,5 @@
 // Rewards.tsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   Gift, Coins, Image as ImageIcon, CheckCircle2, Clock,
@@ -8,7 +8,8 @@ import {
 import { useAuth } from '@/hooks/useAuth';
 import { useRewards } from '@/hooks/useRewards';
 import { useNavigate } from 'react-router-dom';
-import { useWeb3 } from '@/context/Web3Context';
+import { useWeb3, CONTRACT_ADDRESSES, NFT_ABI } from '@/context/Web3Context';
+import { ethers } from 'ethers';
 import { ROUTE_PATHS, Reward, CreditScore } from '@/lib/index';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -228,11 +229,57 @@ function RewardCard({ reward, onClaim, isLoggedIn, userName }: {
 export default function Rewards() {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const { rewards, creditScore, isLoading, claimReward } = useRewards(user?.id);
-  const { isConnected, address, fdyBalance, ethBalance, connect } = useWeb3();
+  const { isConnected, address, fdyBalance, ethBalance, connect, provider } = useWeb3();
   const navigate = useNavigate();
+
+  // Fetch on-chain NFTs owned by connected wallet
+  const [onChainNfts, setOnChainNfts] = useState<any[]>([]);
+  useEffect(() => {
+    if (!isConnected || !address || !provider) return;
+    if (CONTRACT_ADDRESSES.nft === '0x0000000000000000000000000000000000000000') return;
+    const nftContract = new ethers.Contract(CONTRACT_ADDRESSES.nft, NFT_ABI, provider);
+    nftContract.balanceOf(address).then(async (bal: any) => {
+      const count = Number(bal);
+      const nfts = [];
+      for (let i = 0; i < Math.min(count, 20); i++) {
+        try {
+          const tokenId = await nftContract.tokenOfOwnerByIndex(address, i);
+          const uri = await nftContract.tokenURI(tokenId);
+          nfts.push({ tokenId: Number(tokenId), uri });
+        } catch {}
+      }
+      setOnChainNfts(nfts);
+    }).catch(() => {});
+  }, [isConnected, address, provider]);
 
   if (authLoading) {
     return <div className="min-h-[60vh] flex items-center justify-center"><Loader2 className="w-10 h-10 animate-spin text-primary" /></div>;
+  }
+
+  // Must be connected to see rewards
+  if (!isConnected) {
+    return (
+      <div className="max-w-4xl mx-auto px-4 py-10">
+        <div className="text-center py-20 space-y-6">
+          <div className="inline-flex p-6 bg-primary/10 rounded-full">
+            <span className="text-5xl">🦊</span>
+          </div>
+          <h2 className="text-2xl font-bold">Connect your wallet to view rewards</h2>
+          <p className="text-muted-foreground max-w-md mx-auto">
+            Your FDY tokens and NFT rewards are stored on-chain and linked to your MetaMask wallet.
+            Connect to see what you've earned.
+          </p>
+          <Button size="lg" onClick={connect} className="gap-2">
+            🦊 Connect MetaMask
+          </Button>
+          {!isAuthenticated && (
+            <p className="text-sm text-muted-foreground">
+              <button onClick={() => navigate(ROUTE_PATHS.LOGIN)} className="text-primary hover:underline">Log in</button> to also see your credit score and claim history.
+            </p>
+          )}
+        </div>
+      </div>
+    );
   }
 
   const pendingCount = rewards.filter(r => r.status === 'pending').length;
@@ -366,6 +413,38 @@ export default function Rewards() {
             </div>
           )}
         </div>
+
+        {/* On-chain NFTs owned by wallet */}
+        {onChainNfts.length > 0 && (
+          <div>
+            <h2 className="font-bold text-lg mb-4 flex items-center gap-2">
+              <ImageIcon className="w-5 h-5 text-violet-500" /> My NFTs (On-chain)
+            </h2>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+              {onChainNfts.map((nft) => (
+                <Card key={nft.tokenId} className="overflow-hidden hover:shadow-md transition-shadow">
+                  <div className="h-32 bg-violet-50 flex items-center justify-center">
+                    <img
+                      src={nft.uri}
+                      alt={`NFT #${nft.tokenId}`}
+                      className="h-full w-full object-contain"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = 'none';
+                      }}
+                    />
+                  </div>
+                  <CardContent className="p-3">
+                    <p className="font-semibold text-sm">NFT #{nft.tokenId}</p>
+                    <p className="text-xs text-muted-foreground truncate">{nft.uri}</p>
+                    <Badge variant="outline" className="text-xs mt-1 text-violet-600 border-violet-200">
+                      On-chain
+                    </Badge>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </div>
+        )}
       </motion.div>
     </div>
   );

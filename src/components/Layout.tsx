@@ -14,7 +14,7 @@ import {
   DropdownMenuTrigger, DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
 import { AuthModal } from '@/components/AuthModal';
-import { WalletConnect } from '@/components/WalletConnect';
+
 interface LayoutProps {
   children: React.ReactNode;
 }
@@ -51,7 +51,9 @@ export function Layout({ children }: LayoutProps) {
 
   if (isAuthenticated) {
     navLinks.push({ path: ROUTE_PATHS.DASHBOARD, label: t('nav_dashboard'), icon: LayoutDashboard });
-    navLinks.push({ path: '/rewards', label: 'Rewards', icon: Gift });
+    if (user?.role !== 'admin') {
+      navLinks.push({ path: '/rewards', label: 'Rewards', icon: Gift });
+    }
     if (user?.role === 'admin') {
       navLinks.push({ path: '/admin', label: 'Admin', icon: ShieldAlert });
     }
@@ -132,12 +134,13 @@ export function Layout({ children }: LayoutProps) {
             {/* Auth */}
             {isAuthenticated ? (
               <>
-                <Button asChild variant="outline" size="sm" className="gap-2">
-                  <Link to={ROUTE_PATHS.CREATE_CAMPAIGN}>
-                    <Plus className="w-4 h-4" /> Start Campaign
-                  </Link>
-                </Button>
-                <WalletConnect />
+                {user?.role !== 'admin' && (
+                  <Button asChild variant="outline" size="sm" className="gap-2">
+                    <Link to={ROUTE_PATHS.CREATE_CAMPAIGN}>
+                      <Plus className="w-4 h-4" /> Start Campaign
+                    </Link>
+                  </Button>
+                )}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="ghost" className="relative h-10 w-10 rounded-full p-0 overflow-hidden border border-border">
