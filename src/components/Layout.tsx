@@ -191,10 +191,6 @@ export function Layout({ children }: LayoutProps) {
                 <Button onClick={openRegister} className="shadow-md">{t('nav_register')}</Button>
               </div>
             )}
-
-            <Button asChild variant="secondary" className="bg-accent text-accent-foreground hover:bg-accent/90 shadow-sm">
-              <Link to={ROUTE_PATHS.CAMPAIGNS}>{t('btn_donate')}</Link>
-            </Button>
           </div>
 
           {/* Mobile Menu Toggle */}

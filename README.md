@@ -29,7 +29,7 @@ remain:
 - cannot donate own campaign
 - media upload in the post update in the campaign management
 - First page a little bit big the things
-- register button in the homa page(Ready to Start Your Own Campaign?) need to update (currently dont have register page)
+
 
 can do:  
 - Full function of shipping physical reward (may not do)
