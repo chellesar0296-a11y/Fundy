@@ -4,8 +4,8 @@ import { supabase } from '@/lib/supabase';
 
 export const CONTRACT_ADDRESSES = {
   crowdfunding: '0x4dd21289dd70ce0B7780767200E62ddD82be2B76',
-  token:        '0x292F9aa64aCE775DCf14815b5858dE37e0529414',
-  nft:          '0xfEC21dF4cb6B7562095D05281932c5135Dc422Ac',
+  token: '0x292F9aa64aCE775DCf14815b5858dE37e0529414',
+  nft: '0xfEC21dF4cb6B7562095D05281932c5135Dc422Ac',
 };
 
 export const CROWDFUNDING_ABI = [
@@ -54,30 +54,30 @@ export const NFT_ABI = [
 ];
 
 interface Web3ContextType {
-  provider:      ethers.BrowserProvider | null;
-  signer:        ethers.JsonRpcSigner | null;
-  address:       string | null;
-  chainId:       number | null;
-  fdyBalance:    string;
-  ethBalance:    string;
-  isConnected:   boolean;
-  isConnecting:  boolean;
-  error:         string | null;
-  connect:       () => Promise<void>;
-  disconnect:    () => void;
+  provider: ethers.BrowserProvider | null;
+  signer: ethers.JsonRpcSigner | null;
+  address: string | null;
+  chainId: number | null;
+  fdyBalance: string;
+  ethBalance: string;
+  isConnected: boolean;
+  isConnecting: boolean;
+  error: string | null;
+  connect: () => Promise<void>;
+  disconnect: () => void;
   refreshBalance: () => Promise<void>;
   createCampaignOnChain: (
     supabaseId: string, goalEth: string, deadlineTs: number,
     nftUri: string, extraFdyAmount: string, extraFdyMinDonate: string
   ) => Promise<number>;
-  donateEth:          (onChainId: number, amountEth: string) => Promise<any>;
-  donateWithFdy:      (onChainId: number, fdyAmount: string) => Promise<any>;
-  withdrawFunds:      (onChainId: number) => Promise<any>;
-  claimRefund:        (onChainId: number) => Promise<any>;
+  donateEth: (onChainId: number, amountEth: string) => Promise<any>;
+  donateWithFdy: (onChainId: number, fdyAmount: string) => Promise<any>;
+  withdrawFunds: (onChainId: number) => Promise<any>;
+  claimRefund: (onChainId: number) => Promise<any>;
   cancelCampaignOnChain: (onChainId: number) => Promise<any>;
   getCampaignOnChain: (onChainId: number) => Promise<any>;
-  getDonationAmount:  (onChainId: number, donor: string) => Promise<string>;
-  approveExtraFdy:    (amount: string) => Promise<void>;
+  getDonationAmount: (onChainId: number, donor: string) => Promise<string>;
+  approveExtraFdy: (amount: string) => Promise<void>;
 }
 
 const Web3Context = createContext<Web3ContextType | null>(null);
@@ -90,7 +90,7 @@ async function getBalances(prov: ethers.BrowserProvider, addr: string) {
       const tk = new ethers.Contract(CONTRACT_ADDRESSES.token, TOKEN_ABI, prov);
       fdy = Number(ethers.formatEther(await tk.balanceOf(addr))).toFixed(2);
     }
-  } catch {}
+  } catch { }
   return { eth: Number(ethers.formatEther(ethBal)).toFixed(4), fdy };
 }
 
@@ -101,15 +101,15 @@ export function Web3Provider({
   userId?: string;
   boundWalletAddress?: string | null;
 }) {
-  const [provider,     setProvider]     = useState<ethers.BrowserProvider | null>(null);
-  const [signer,       setSigner]       = useState<ethers.JsonRpcSigner | null>(null);
-  const [address,      setAddress]      = useState<string | null>(null);
-  const [chainId,      setChainId]      = useState<number | null>(null);
-  const [fdyBalance,   setFdyBalance]   = useState('0');
-  const [ethBalance,   setEthBalance]   = useState('0');
-  const [isConnected,  setIsConnected]  = useState(false);
+  const [provider, setProvider] = useState<ethers.BrowserProvider | null>(null);
+  const [signer, setSigner] = useState<ethers.JsonRpcSigner | null>(null);
+  const [address, setAddress] = useState<string | null>(null);
+  const [chainId, setChainId] = useState<number | null>(null);
+  const [fdyBalance, setFdyBalance] = useState('0');
+  const [ethBalance, setEthBalance] = useState('0');
+  const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
-  const [error,        setError]        = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const applyBalances = (bal: { eth: string; fdy: string }) => {
     setEthBalance(bal.eth); setFdyBalance(bal.fdy);
@@ -122,21 +122,27 @@ export function Web3Provider({
 
   // ── Auto-reconnect to bound wallet (no popup) ───────────────
   useEffect(() => {
-    if (!boundWalletAddress || !window.ethereum || isConnected) return;
+    // New/fresh user with no bound wallet — clear any stale connecting state
+    if (!boundWalletAddress) {
+      setIsConnecting(false);
+      setError(null);
+      return;
+    }
+    if (!window.ethereum || isConnected) return;
     (async () => {
       try {
-        const prov     = new ethers.BrowserProvider(window.ethereum);
+        const prov = new ethers.BrowserProvider(window.ethereum);
         const accounts: string[] = await prov.send('eth_accounts', []);
-        const match    = accounts.find(a => a.toLowerCase() === boundWalletAddress.toLowerCase());
+        const match = accounts.find(a => a.toLowerCase() === boundWalletAddress.toLowerCase());
         if (!match) return;
-        const sgn     = await prov.getSigner(match);
+        const sgn = await prov.getSigner(match);
         const network = await prov.getNetwork();
-        const bal     = await getBalances(prov, match);
+        const bal = await getBalances(prov, match);
         setConnected(prov, sgn, match, Number(network.chainId), bal);
-      } catch {}
+      } catch { }
     })();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [boundWalletAddress, isConnected]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boundWalletAddress, isConnected]);
 
   // ── Connect ────────────────────────────────────────────────
   const connect = useCallback(async () => {
@@ -149,15 +155,15 @@ export function Web3Provider({
       if (boundWalletAddress) {
         // Account already bound — just connect to it
         await prov.send('eth_requestAccounts', []);
-        const sgn  = await prov.getSigner();
+        const sgn = await prov.getSigner();
         const addr = await sgn.getAddress();
 
         if (addr.toLowerCase() !== boundWalletAddress.toLowerCase()) {
-          setError(`Wrong wallet. Please switch MetaMask to: ${boundWalletAddress.slice(0,10)}...${boundWalletAddress.slice(-6)}`);
+          setError(`Wrong wallet. Please switch MetaMask to: ${boundWalletAddress.slice(0, 10)}...${boundWalletAddress.slice(-6)}`);
           return;
         }
         const network = await prov.getNetwork();
-        const bal     = await getBalances(prov, addr);
+        const bal = await getBalances(prov, addr);
         setConnected(prov, sgn, addr, Number(network.chainId), bal);
         return;
       }
@@ -170,7 +176,7 @@ export function Web3Provider({
         await prov.send('eth_requestAccounts', []);
       }
 
-      const sgn  = await prov.getSigner();
+      const sgn = await prov.getSigner();
       const addr = await sgn.getAddress();
 
       // Sign to verify ownership
@@ -182,7 +188,7 @@ export function Web3Provider({
       }
 
       const network = await prov.getNetwork();
-      const bal     = await getBalances(prov, addr);
+      const bal = await getBalances(prov, addr);
       setConnected(prov, sgn, addr, Number(network.chainId), bal);
 
       // Bind wallet to profile
@@ -218,7 +224,7 @@ export function Web3Provider({
         return;
       }
       setAddress(accounts[0]);
-      if (provider) getBalances(provider, accounts[0]).then(applyBalances).catch(() => {});
+      if (provider) getBalances(provider, accounts[0]).then(applyBalances).catch(() => { });
     };
     const onChain = () => window.location.reload();
     window.ethereum.on('accountsChanged', onAccounts);
@@ -230,7 +236,7 @@ export function Web3Provider({
   }, [disconnect, provider, boundWalletAddress]);
 
   // ── Contract getters ────────────────────────────────────────
-  const cf  = useCallback((w = false) => {
+  const cf = useCallback((w = false) => {
     if (!provider) throw new Error('Wallet not connected');
     return new ethers.Contract(CONTRACT_ADDRESSES.crowdfunding, CROWDFUNDING_ABI, w ? signer! : provider);
   }, [provider, signer]);
@@ -245,20 +251,20 @@ export function Web3Provider({
     supabaseId: string, goalEth: string, deadlineTs: number,
     nftUri: string, extraFdyAmount: string, extraFdyMinDonate: string,
   ): Promise<number> => {
-    const extraFdyWei  = extraFdyAmount ? ethers.parseEther(extraFdyAmount) : 0n;
-    const extraMinWei  = extraFdyMinDonate ? ethers.parseEther(extraFdyMinDonate) : 0n;
-    const tx      = await cf(true).createCampaign(supabaseId, ethers.parseEther(goalEth), deadlineTs, nftUri, extraFdyWei, extraMinWei);
+    const extraFdyWei = extraFdyAmount ? ethers.parseEther(extraFdyAmount) : 0n;
+    const extraMinWei = extraFdyMinDonate ? ethers.parseEther(extraFdyMinDonate) : 0n;
+    const tx = await cf(true).createCampaign(supabaseId, ethers.parseEther(goalEth), deadlineTs, nftUri, extraFdyWei, extraMinWei);
     const receipt = await tx.wait();
-    const iface   = new ethers.Interface(CROWDFUNDING_ABI);
+    const iface = new ethers.Interface(CROWDFUNDING_ABI);
     for (const log of receipt.logs) {
-      try { const p = iface.parseLog(log); if (p?.name === 'CampaignCreated') return Number(p.args.campaignId); } catch {}
+      try { const p = iface.parseLog(log); if (p?.name === 'CampaignCreated') return Number(p.args.campaignId); } catch { }
     }
     throw new Error('CampaignCreated event not found');
   }, [cf]);
 
   const donateEth = useCallback(async (id: number, amtEth: string) => {
     const tx = await cf(true).donate(id, { value: ethers.parseEther(amtEth) });
-    const r  = await tx.wait(); await refreshBalance(); return r;
+    const r = await tx.wait(); await refreshBalance(); return r;
   }, [cf, refreshBalance]);
 
   const donateWithFdy = useCallback(async (id: number, fdyAmt: string) => {
@@ -267,20 +273,20 @@ export function Web3Provider({
     const approveTx = await tk(true).approve(CONTRACT_ADDRESSES.crowdfunding, wei);
     await approveTx.wait();
     const tx = await cf(true).donateWithFdy(id, wei);
-    const r  = await tx.wait(); await refreshBalance(); return r;
+    const r = await tx.wait(); await refreshBalance(); return r;
   }, [cf, tk, refreshBalance]);
 
   const approveExtraFdy = useCallback(async (amount: string) => {
     const wei = ethers.parseEther(amount);
-    const tx  = await tk(true).approve(CONTRACT_ADDRESSES.crowdfunding, wei);
+    const tx = await tk(true).approve(CONTRACT_ADDRESSES.crowdfunding, wei);
     await tx.wait();
   }, [tk]);
 
-  const withdrawFunds         = useCallback(async (id: number) => (await (await cf(true).withdraw(id)).wait()), [cf]);
-  const claimRefund           = useCallback(async (id: number) => (await (await cf(true).claimRefund(id)).wait()), [cf]);
+  const withdrawFunds = useCallback(async (id: number) => (await (await cf(true).withdraw(id)).wait()), [cf]);
+  const claimRefund = useCallback(async (id: number) => (await (await cf(true).claimRefund(id)).wait()), [cf]);
   const cancelCampaignOnChain = useCallback(async (id: number) => (await (await cf(true).cancelCampaign(id)).wait()), [cf]);
-  const getCampaignOnChain    = useCallback(async (id: number) => await cf().getCampaign(id), [cf]);
-  const getDonationAmount     = useCallback(async (id: number, donor: string) => ethers.formatEther(await cf().getEthDonation(id, donor)), [cf]);
+  const getCampaignOnChain = useCallback(async (id: number) => await cf().getCampaign(id), [cf]);
+  const getDonationAmount = useCallback(async (id: number, donor: string) => ethers.formatEther(await cf().getEthDonation(id, donor)), [cf]);
 
   return (
     <Web3Context.Provider value={{

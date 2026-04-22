@@ -35,7 +35,7 @@ function AppWithWeb3() {
   if (isLoading) return null;
 
   return (
-    <Web3Provider userId={user?.id} boundWalletAddress={user?.walletAddress ?? null}>
+    <Web3Provider key={user?.id ?? 'guest'} userId={user?.id} boundWalletAddress={user?.walletAddress ?? null}>
       <Layout>
         <Routes>
           <Route path={ROUTE_PATHS.HOME} element={<Home />} />
