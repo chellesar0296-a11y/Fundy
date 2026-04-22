@@ -17,8 +17,8 @@ import { Separator } from '@/components/ui/separator';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
-  ImageIcon, Loader2, ArrowLeft, Info, ShieldCheck, ShieldAlert, Sparkles, Plus,
-  Trash2, Gift, Coins, Image as NftIcon, ChevronDown, ChevronUp,
+  ImageIcon, Loader2, ArrowLeft, Info, ShieldCheck, ShieldAlert, Sparkles,
+  Trash2, Coins, ChevronDown, ChevronUp,
 } from 'lucide-react';
 
 // ─── Constants ────────────────────────────────────────────────
@@ -164,12 +164,11 @@ function TierEditor({ tier, index, onUpdate, onRemove }: {
 export default function CreateCampaign() {
   const navigate = useNavigate();
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
-  const { isConnected, connect, createCampaignOnChain, approveExtraFdy } = useWeb3();
+  const { isConnected, connect, createCampaignOnChain, approveExtraFdy, buyFdy, checkFdyBalance } = useWeb3();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [previewUrl, setPreviewUrl] = useState('');
 
   // ── On-chain reward config ────────────────────────────────
-  const [nftUri,           setNftUri]           = useState('');
   const [extraFdyAmount,   setExtraFdyAmount]   = useState('');
   const [extraFdyMinRm,    setExtraFdyMinRm]    = useState('');
   const [extraFdyBudget,   setExtraFdyBudget]   = useState('');
@@ -210,14 +209,26 @@ export default function CreateCampaign() {
         organizer_id: user.id,
       });
 
-      // If offering extra FDY — approve budget from organizer wallet first
+      // If offering extra FDY — check balance, buy if needed, then approve
       if (extraFdyAmount && extraFdyBudget) {
         try {
+          toast.info('Checking FDY balance...');
+          const hasSufficientFdy = await checkFdyBalance(extraFdyBudget);
+
+          if (!hasSufficientFdy) {
+            // Need to buy FDY: budget FDY / 100 = ETH needed (1 ETH = 100 FDY)
+            const ethNeeded = (Number(extraFdyBudget) / 100).toFixed(6);
+            toast.info(`Insufficient FDY — purchasing ${extraFdyBudget} FDY (costs ${ethNeeded} ETH)...`);
+            await buyFdy(ethNeeded);
+            toast.success('FDY purchased!');
+          }
+
           toast.info('Step 1/2: Approving FDY budget...');
           await approveExtraFdy(extraFdyBudget);
+          toast.success('FDY approved!');
         } catch (e: any) {
-          if (e?.code === 4001) { toast.error('FDY approval cancelled.'); setIsSubmitting(false); return; }
-          toast.warning('FDY approval failed — extra token reward disabled.');
+          if (e?.code === 4001) { toast.error('Transaction cancelled.'); setIsSubmitting(false); return; }
+          toast.warning('FDY setup failed — extra token reward disabled.');
         }
       }
 
@@ -229,12 +240,19 @@ export default function CreateCampaign() {
         const deadlineTs     = Math.floor(new Date(values.end_date).getTime() / 1000);
         const extraFdyWei    = extraFdyAmount || '0';
         const extraMinEth    = extraFdyMinRm ? (Number(extraFdyMinRm) * 0.001).toFixed(6) : '0';
-        onChainId = await createCampaignOnChain(campaign.id, goalEth, deadlineTs, nftUri, extraFdyWei, extraMinEth);
+        onChainId = await createCampaignOnChain(campaign.id, goalEth, deadlineTs, '', extraFdyWei, extraMinEth);
         await supabase.from('campaigns').update({ on_chain_id: onChainId }).eq('id', campaign.id);
         toast.success(`Campaign live on-chain! ID: #${onChainId}`);
       } catch (chainErr: any) {
-        if (chainErr?.code === 4001) { toast.error('Transaction cancelled.'); setIsSubmitting(false); return; }
-        toast.warning('Campaign saved but on-chain registration failed.');
+        // On-chain failed — delete Supabase record to avoid orphaned campaigns
+        await supabase.from('campaigns').delete().eq('id', campaign.id);
+        if (chainErr?.code === 4001) {
+          toast.error('Transaction cancelled. Campaign was not created.');
+        } else {
+          toast.error('On-chain registration failed. Please try again.');
+        }
+        setIsSubmitting(false);
+        return;
       }
 
       navigate(ROUTE_PATHS.CAMPAIGN_DETAIL.replace(':id', campaign.id));
@@ -466,34 +484,6 @@ export default function CreateCampaign() {
                       </div>
                     </div>
 
-                    {/* NFT reward */}
-                    <div className="p-4 bg-violet-50 border border-violet-200 rounded-xl space-y-3">
-                      <p className="font-semibold text-violet-900 flex items-center gap-2">
-                        🖼️ NFT Reward for RM500+ Donors <span className="text-xs font-normal text-violet-700">(optional)</span>
-                      </p>
-                      <p className="text-xs text-violet-800">
-                        Donors who give <strong>RM500 or more</strong> will automatically receive a unique NFT.
-                        Provide an image URL or IPFS link for the NFT artwork.
-                        <br />
-                        ⚠️ The NFT image should be publicly accessible and permanent. Consider using IPFS (e.g. Pinata) for long-term storage.
-                        <br />
-                        Format accepted: <code className="bg-violet-100 px-1 rounded">https://...</code> or <code className="bg-violet-100 px-1 rounded">ipfs://Qm...</code>
-                      </p>
-                      <div className="space-y-1">
-                        <label className="text-xs font-semibold text-violet-900">NFT image / metadata URL</label>
-                        <input type="url" placeholder="https://your-image.com/nft.png  or  ipfs://Qm..."
-                          value={nftUri} onChange={e => setNftUri(e.target.value)}
-                          className="w-full px-3 py-2 text-sm border border-violet-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-400 bg-white" />
-                      </div>
-                      {nftUri && (
-                        <div className="flex items-start gap-3 p-2 bg-violet-100 rounded-lg">
-                          <img src={nftUri} alt="NFT preview"
-                            className="w-16 h-16 object-cover rounded-lg border border-violet-300"
-                            onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                          <p className="text-xs text-violet-700 break-all">{nftUri}</p>
-                        </div>
-                      )}
-                    </div>
                   </div>
                 )}
               </div>

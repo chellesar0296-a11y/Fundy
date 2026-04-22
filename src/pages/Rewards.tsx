@@ -2,291 +2,187 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
-  Gift, Coins, Image as ImageIcon, CheckCircle2, Clock,
-  Loader2, Star, Zap, Lock, Share2,
+  Coins, Loader2, ArrowDownLeft, ArrowUpRight,
+  Gift, RefreshCw, Wallet, TrendingUp, Lock,
 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
-import { useRewards } from '@/hooks/useRewards';
 import { useNavigate } from 'react-router-dom';
-import { useWeb3, CONTRACT_ADDRESSES, NFT_ABI } from '@/context/Web3Context';
+import { useWeb3, CONTRACT_ADDRESSES, CROWDFUNDING_ABI } from '@/context/Web3Context';
 import { ethers } from 'ethers';
-import { ROUTE_PATHS, Reward, CreditScore } from '@/lib/index';
+import { ROUTE_PATHS } from '@/lib/index';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent } from '@/components/ui/card';
-import { Progress } from '@/components/ui/progress';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { toast } from 'sonner';
 
-const LEVEL_COLORS: Record<string, string> = {
-  Bronze: 'text-amber-700 bg-amber-100 border-amber-200',
-  Silver: 'text-slate-600 bg-slate-100 border-slate-200',
-  Gold: 'text-yellow-700 bg-yellow-100 border-yellow-200',
-  Platinum: 'text-violet-700 bg-violet-100 border-violet-200',
-};
+// ── Types ──────────────────────────────────────────────────────
+type TxType = 'earned_donation' | 'earned_extra' | 'earned_refund' | 'spent_donation';
 
-const TYPE_ICON: Record<string, React.ElementType> = {
-  ERC721: ImageIcon, ERC20: Coins, badge: Gift, physical: Gift,
-};
-
-const TYPE_LABEL: Record<string, string> = {
-  ERC721: 'NFT', ERC20: 'Token', badge: 'Badge', physical: 'Physical',
-};
-
-const STATUS_COLOR: Record<string, string> = {
-  pending: 'bg-amber-100 text-amber-700',
-  minted: 'bg-blue-100 text-blue-700',
-  claimed: 'bg-emerald-100 text-emerald-700',
-  failed: 'bg-red-100 text-red-700',
-};
-
-// ── Credit Score ──────────────────────────────────────────────
-function CreditScoreCard({ score }: { score: CreditScore }) {
-  const pct = Math.min((score.score / 1000) * 100, 100);
-  return (
-    <Card className="overflow-hidden">
-      <div className="h-2 bg-gradient-to-r from-amber-400 via-yellow-400 to-violet-500" style={{ width: `${pct}%` }} />
-      <CardContent className="p-6">
-        <div className="flex items-start justify-between gap-4 mb-4">
-          <div>
-            <p className="text-sm text-muted-foreground">Credit Score</p>
-            <p className="text-4xl font-extrabold mt-1">{score.score}<span className="text-lg text-muted-foreground">/1000</span></p>
-          </div>
-          <Badge className={`text-sm px-3 py-1 border ${LEVEL_COLORS[score.level]}`}>
-            <Star className="w-3.5 h-3.5 mr-1" /> {score.level}
-          </Badge>
-        </div>
-        <Progress value={pct} className="h-2 mb-5" />
-        <div className="grid grid-cols-3 gap-4 text-center text-sm">
-          <div>
-            <p className="text-2xl font-bold">RM{score.totalDonations.toLocaleString()}</p>
-            <p className="text-xs text-muted-foreground">Total Donated</p>
-          </div>
-          <div>
-            <p className="text-2xl font-bold">{score.campaignsSupported}</p>
-            <p className="text-xs text-muted-foreground">Campaigns</p>
-          </div>
-          <div>
-            <p className="text-2xl font-bold">{score.streakDays}</p>
-            <p className="text-xs text-muted-foreground">Streak Days</p>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
+interface FdyTx {
+  type: TxType;
+  fdyAmount: string;    // formatted FDY
+  campaignId: string;
+  txHash: string;
+  blockNumber: number;
+  date: Date | null;
 }
 
-// ── Reward Card ───────────────────────────────────────────────
-function RewardCard({ reward, onClaim, isLoggedIn, userName }: {
-  reward: Reward;
-  onClaim: (id: string) => Promise<void>;
-  isLoggedIn: boolean;
-  userName?: string;
-}) {
-  const Icon = TYPE_ICON[reward.type] ?? Gift;
-  const [claiming, setClaiming] = useState(false);
-  const [showDetail, setShowDetail] = useState(false);
+const TX_META: Record<TxType, { label: string; sign: '+' | '-'; color: string; bg: string; icon: React.ElementType }> = {
+  earned_donation: { label: 'Donation Reward',  sign: '+', color: 'text-emerald-600', bg: 'bg-emerald-50',  icon: ArrowDownLeft  },
+  earned_extra:    { label: 'Bonus FDY Reward', sign: '+', color: 'text-blue-600',    bg: 'bg-blue-50',     icon: Gift           },
+  earned_refund:   { label: 'Refund',           sign: '+', color: 'text-amber-600',   bg: 'bg-amber-50',    icon: RefreshCw      },
+  spent_donation:  { label: 'Donated with FDY', sign: '-', color: 'text-rose-600',    bg: 'bg-rose-50',     icon: ArrowUpRight   },
+};
 
-  const handleClaim = async (e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    if (!isLoggedIn) { toast.error('Please log in to claim rewards.'); return; }
-    if (reward.status === 'claimed') { toast.info('Already claimed!'); return; }
-    if (reward.status !== 'minted') { toast.info('Not ready to claim yet.'); return; }
-    setClaiming(true);
-    try {
-      await onClaim(reward.id);
-      toast.success(`${reward.name} claimed! 🎉`);
-    } catch {
-      toast.error('Failed to claim. Please try again.');
-    } finally {
-      setClaiming(false);
-    }
-  };
+// ETH ↔ RM: 1 ETH = 1000 RM  (same as rest of app)
+const ETH_TO_RM = 1000;
 
-  const handleShare = (e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    const text = `🎖️ I just earned "${reward.name}" on Fundy!\n\nI donated to "${reward.campaignTitle}" and received this reward.${userName ? `\n\n— ${userName}` : ''}\n\nJoin me on Fundy! 🌟`;
-    if (navigator.share) {
-      navigator.share({ title: `Fundy Reward — ${reward.name}`, text }).catch(() => { });
-    } else {
-      navigator.clipboard.writeText(text);
-      toast.success('Share text copied to clipboard!');
-    }
-  };
+// ── FDY History Hook ──────────────────────────────────────────
+function useFdyHistory(address: string | null, provider: ethers.BrowserProvider | null) {
+  const [txs, setTxs]       = useState<FdyTx[]>([]);
+  const [loading, setLoading] = useState(false);
 
-  const bgColor = reward.status === 'claimed' ? 'bg-emerald-50' : reward.status === 'minted' ? 'bg-blue-50' : 'bg-muted/40';
-  const iconColor = reward.status === 'claimed' ? 'text-emerald-500' : reward.status === 'minted' ? 'text-blue-500' : 'text-muted-foreground';
+  useEffect(() => {
+    if (!address || !provider) { setTxs([]); return; }
 
-  return (
-    <>
-      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}>
-        <Card
-          className={`overflow-hidden hover:shadow-md transition-shadow cursor-pointer ${reward.status === 'claimed' ? 'opacity-90' : ''}`}
-          onClick={() => setShowDetail(true)}
-        >
-          <div className={`h-28 flex items-center justify-center ${bgColor}`}>
-            {reward.imageUrl
-              ? <img src={reward.imageUrl} alt={reward.name} className="h-full w-full object-cover" />
-              : <div className="p-4 rounded-full bg-white/60"><Icon className={`w-10 h-10 ${iconColor}`} /></div>
-            }
-          </div>
-          <CardContent className="p-4 space-y-2">
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <p className="font-bold text-sm line-clamp-1">{reward.name}</p>
-                <p className="text-xs text-muted-foreground line-clamp-1">{reward.campaignTitle}</p>
-              </div>
-              <span className={`shrink-0 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${STATUS_COLOR[reward.status] ?? ''}`}>
-                {reward.status === 'minted' ? 'Ready' : reward.status}
-              </span>
-            </div>
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <Badge variant="outline" className="text-xs">{TYPE_LABEL[reward.type] ?? reward.type}</Badge>
-              {reward.tokenAmount && <Badge variant="secondary" className="text-xs">+{reward.tokenAmount} FDY</Badge>}
-            </div>
-            {reward.status === 'minted' && (
-              <Button size="sm" className="w-full" onClick={handleClaim} disabled={claiming || !isLoggedIn}>
-                {claiming ? <><Loader2 className="w-3 h-3 animate-spin mr-1" />Claiming...</>
-                  : !isLoggedIn ? <><Lock className="w-3 h-3 mr-1" />Login to Claim</>
-                    : <><Zap className="w-3 h-3 mr-1" />Claim Reward</>}
-              </Button>
-            )}
-            {reward.status === 'claimed' && (
-              <p className="text-center text-xs text-emerald-600 font-medium py-1 flex items-center justify-center gap-1">
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                {reward.claimedAt ? `Claimed ${new Date(reward.claimedAt).toLocaleDateString()}` : 'Claimed'}
-              </p>
-            )}
-            {reward.status === 'pending' && (
-              <p className="text-center text-xs text-amber-600 font-medium py-1 flex items-center justify-center gap-1">
-                <Clock className="w-3.5 h-3.5" />Awaiting mint...
-              </p>
-            )}
-          </CardContent>
-        </Card>
-      </motion.div>
+    let cancelled = false;
+    setLoading(true);
 
-      {/* Detail + Share Dialog */}
-      <Dialog open={showDetail} onOpenChange={setShowDetail}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>{reward.name}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className={`h-40 rounded-xl flex items-center justify-center ${bgColor}`}>
-              {reward.imageUrl
-                ? <img src={reward.imageUrl} alt={reward.name} className="h-full w-full object-contain rounded-xl" />
-                : <div className="p-6 rounded-full bg-white/60"><Icon className={`w-16 h-16 ${iconColor}`} /></div>
-              }
-            </div>
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-2 flex-wrap">
-                <Badge variant="outline">{TYPE_LABEL[reward.type] ?? reward.type}</Badge>
-                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${STATUS_COLOR[reward.status] ?? ''}`}>
-                  {reward.status === 'minted' ? 'Ready to Claim' : reward.status}
-                </span>
-              </div>
-              <p className="text-sm text-muted-foreground">{reward.description || 'No description.'}</p>
-              <p className="text-xs text-muted-foreground">
-                Campaign: <span className="font-medium text-foreground">{reward.campaignTitle}</span>
-              </p>
-              {reward.tokenAmount && <p className="text-sm font-semibold text-primary">+{reward.tokenAmount} FDY tokens</p>}
-              {reward.claimedAt && (
-                <p className="text-xs text-muted-foreground">
-                  Claimed on {new Date(reward.claimedAt).toLocaleDateString()}
-                </p>
-              )}
-            </div>
+    (async () => {
+      try {
+        const contract = new ethers.Contract(CONTRACT_ADDRESSES.crowdfunding, CROWDFUNDING_ABI, provider);
+        const iface    = new ethers.Interface(CROWDFUNDING_ABI);
 
-            {/* Share preview */}
-            {(reward.status === 'claimed' || reward.status === 'minted') && (
-              <div className="p-3 bg-muted/50 rounded-lg text-xs text-muted-foreground whitespace-pre-line font-mono">
-                {`🎖️ I earned "${reward.name}" on Fundy!\nI donated to "${reward.campaignTitle}".${userName ? `\n— ${userName}` : ''}`}
-              </div>
-            )}
+        // Fetch all relevant events in parallel
+        const [donationEvents, extraEvents, fdyDonationEvents, refundEvents] = await Promise.all([
+          contract.queryFilter(contract.filters.DonationReceived(null, address), 0, 'latest'),
+          contract.queryFilter(contract.filters.ExtraFdyAwarded(null, address),  0, 'latest'),
+          contract.queryFilter(contract.filters.FdyDonation(null, address),      0, 'latest'),
+          contract.queryFilter(contract.filters.FdyRefundIssued(null, address),  0, 'latest'),
+        ]);
 
-            <div className="flex gap-2">
-              {reward.status === 'minted' && (
-                <Button className="flex-1" onClick={handleClaim} disabled={claiming || !isLoggedIn}>
-                  {claiming ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Zap className="w-4 h-4 mr-2" />}
-                  Claim
-                </Button>
-              )}
-              {(reward.status === 'claimed' || reward.status === 'minted') && (
-                <Button variant="outline" className="flex-1" onClick={handleShare}>
-                  <Share2 className="w-4 h-4 mr-2" /> Share
-                </Button>
-              )}
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-    </>
-  );
+        if (cancelled) return;
+
+        // Helper to get block date
+        const dateCache: Record<number, Date | null> = {};
+        const getDate = async (blockNumber: number): Promise<Date | null> => {
+          if (blockNumber in dateCache) return dateCache[blockNumber];
+          try {
+            const block = await provider.getBlock(blockNumber);
+            dateCache[blockNumber] = block ? new Date(Number(block.timestamp) * 1000) : null;
+          } catch {
+            dateCache[blockNumber] = null;
+          }
+          return dateCache[blockNumber];
+        };
+
+        // Parse all events
+        const raw: FdyTx[] = [];
+
+        for (const e of donationEvents) {
+          try {
+            const p = iface.parseLog(e);
+            if (!p) continue;
+            raw.push({
+              type: 'earned_donation',
+              fdyAmount: ethers.formatEther(p.args.fdyMinted),
+              campaignId: p.args.campaignId.toString(),
+              txHash: e.transactionHash,
+              blockNumber: e.blockNumber,
+              date: null,
+            });
+          } catch {}
+        }
+
+        for (const e of extraEvents) {
+          try {
+            const p = iface.parseLog(e);
+            if (!p) continue;
+            raw.push({
+              type: 'earned_extra',
+              fdyAmount: ethers.formatEther(p.args.fdyAmount),
+              campaignId: p.args.campaignId.toString(),
+              txHash: e.transactionHash,
+              blockNumber: e.blockNumber,
+              date: null,
+            });
+          } catch {}
+        }
+
+        for (const e of fdyDonationEvents) {
+          try {
+            const p = iface.parseLog(e);
+            if (!p) continue;
+            raw.push({
+              type: 'spent_donation',
+              fdyAmount: ethers.formatEther(p.args.fdyBurned),
+              campaignId: p.args.campaignId.toString(),
+              txHash: e.transactionHash,
+              blockNumber: e.blockNumber,
+              date: null,
+            });
+          } catch {}
+        }
+
+        for (const e of refundEvents) {
+          try {
+            const p = iface.parseLog(e);
+            if (!p) continue;
+            raw.push({
+              type: 'earned_refund',
+              fdyAmount: ethers.formatEther(p.args.fdyAmount),
+              campaignId: p.args.campaignId.toString(),
+              txHash: e.transactionHash,
+              blockNumber: e.blockNumber,
+              date: null,
+            });
+          } catch {}
+        }
+
+        // Sort by block descending, then fetch dates
+        raw.sort((a, b) => b.blockNumber - a.blockNumber);
+        const dated = await Promise.all(
+          raw.map(async tx => ({ ...tx, date: await getDate(tx.blockNumber) }))
+        );
+
+        if (!cancelled) setTxs(dated);
+      } catch (err) {
+        console.error('FDY history fetch failed:', err);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [address, provider]);
+
+  return { txs, loading };
 }
 
 // ── Main ──────────────────────────────────────────────────────
 export default function Rewards() {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
-  const { rewards, creditScore, isLoading, claimReward } = useRewards(user?.id);
   const { isConnected, address, fdyBalance, ethBalance, connect, provider } = useWeb3();
+  const { txs, loading: historyLoading } = useFdyHistory(isConnected ? address : null, provider);
   const navigate = useNavigate();
 
-  // ── ALL hooks must be before any early returns ──
-  const [walletWait, setWalletWait] = useState(true);
-  const [onChainNfts, setOnChainNfts] = useState<any[]>([]);
-
-  // Auto-connect + 5s timeout
-  useEffect(() => {
-  if (!isAuthenticated) return; // don't attempt if not logged in
-
-  const t = setTimeout(() => {
-    if (!isConnected && window.ethereum) {
-      connect().catch(() => {}); // popup only if extension exists + still not connected
-    }
-    setWalletWait(false);
-  }, 3000);
-  return () => clearTimeout(t);
-}, [isAuthenticated]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Dismiss spinner immediately when wallet connects
-  useEffect(() => {
-    if (isConnected) setWalletWait(false);
-  }, [isConnected]);
-
-  // Fetch on-chain NFTs
-  useEffect(() => {
-    if (!isConnected || !address || !provider) return;
-    if (CONTRACT_ADDRESSES.nft === '0x0000000000000000000000000000000000000000') return;
-    const nftContract = new ethers.Contract(CONTRACT_ADDRESSES.nft, NFT_ABI, provider);
-    nftContract.balanceOf(address).then(async (bal: any) => {
-      const count = Number(bal);
-      const nfts = [];
-      for (let i = 0; i < Math.min(count, 20); i++) {
-        try {
-          const tokenId = await nftContract.tokenOfOwnerByIndex(address, i);
-          const uri = await nftContract.tokenURI(tokenId);
-          nfts.push({ tokenId: Number(tokenId), uri });
-        } catch { }
-      }
-      setOnChainNfts(nfts);
-    }).catch(() => { });
-  }, [isConnected, address, provider]);
-
-  // ── Early returns AFTER all hooks ──
+  // ── Auth gate ───────────────────────────────────────────────
   if (authLoading) {
-    return <div className="min-h-[60vh] flex items-center justify-center"><Loader2 className="w-10 h-10 animate-spin text-primary" /></div>;
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <Loader2 className="w-10 h-10 animate-spin text-primary" />
+      </div>
+    );
   }
 
   if (!isAuthenticated) {
     return (
       <div className="min-h-[80vh] flex flex-col items-center justify-center p-6 text-center">
-        <div className="bg-accent/20 p-6 rounded-full mb-6">
-          <Gift className="w-16 h-16 text-primary" />
+        <div className="bg-primary/10 p-6 rounded-full mb-6">
+          <Coins className="w-16 h-16 text-primary" />
         </div>
         <h2 className="text-3xl font-bold mb-4">Authentication Required</h2>
         <p className="text-muted-foreground max-w-md mb-8">
-          Please log in to view your rewards and claim your FDY tokens.
+          Please log in to view your FDY balance and transaction history.
         </p>
         <div className="flex gap-4">
           <Button onClick={() => navigate(ROUTE_PATHS.LOGIN)} size="lg">Log In</Button>
@@ -296,186 +192,179 @@ export default function Rewards() {
     );
   }
 
-  if (!isConnected && walletWait) {
+  // ── Wallet not connected ────────────────────────────────────
+  if (!isConnected) {
     return (
-      <div className="max-w-4xl mx-auto px-4 py-10">
-        <div className="text-center py-20 space-y-4">
-          <Loader2 className="w-10 h-10 animate-spin text-primary mx-auto" />
-          <p className="text-muted-foreground">Reconnecting wallet...</p>
-          <p className="text-xs text-muted-foreground mt-2">
-            Taking too long?{' '}
-            <button onClick={connect} className="text-primary hover:underline">
-              Connect manually
-            </button>
-          </p>
+      <div className="max-w-lg mx-auto px-4 py-20 text-center space-y-6">
+        <div className="bg-muted/40 p-6 rounded-full inline-flex mx-auto">
+          <Wallet className="w-14 h-14 text-muted-foreground" />
         </div>
+        <div>
+          <h2 className="text-2xl font-bold mb-2">Connect your wallet</h2>
+          <p className="text-muted-foreground">Your FDY balance and history live on-chain. Connect MetaMask to view them.</p>
+        </div>
+        <Button size="lg" onClick={connect} className="gap-2">🦊 Connect MetaMask</Button>
       </div>
     );
   }
 
-  const pendingCount = rewards.filter(r => r.status === 'pending').length;
-  const mintedCount = rewards.filter(r => r.status === 'minted').length;
-  const claimedCount = rewards.filter(r => r.status === 'claimed').length;
+  // ── Derived stats ───────────────────────────────────────────
+  const fdyNum      = Number(fdyBalance);
+  const ethNum      = Number(ethBalance);
+  const ethInRm     = (ethNum * ETH_TO_RM).toFixed(2);
+
+  const totalEarned = txs
+    .filter(t => t.type !== 'spent_donation')
+    .reduce((sum, t) => sum + Number(t.fdyAmount), 0);
+
+  const totalSpent = txs
+    .filter(t => t.type === 'spent_donation')
+    .reduce((sum, t) => sum + Number(t.fdyAmount), 0);
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-10">
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+    <div className="max-w-3xl mx-auto px-4 py-10">
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
+
         {/* Header */}
         <div>
-          <h1 className="text-3xl font-extrabold tracking-tight mb-2 flex items-center gap-2">
-            <Gift className="w-8 h-8 text-primary" /> Rewards
+          <h1 className="text-3xl font-extrabold tracking-tight flex items-center gap-2 mb-1">
+            <Coins className="w-8 h-8 text-primary" /> FDY Tokens
           </h1>
-          <p className="text-muted-foreground">
-            Every donation earns FDY tokens and on-chain rewards.
-            {!isAuthenticated && ' Log in to claim yours.'}
-          </p>
+          <p className="text-muted-foreground text-sm">Earn FDY by donating. Spend FDY to donate again.</p>
         </div>
 
-        {/* Login prompt — soft banner */}
-        {!isAuthenticated && (
-          <Card className="border-primary/20 bg-primary/5">
-            <CardContent className="flex items-center justify-between gap-4 py-4">
-              <div className="flex items-center gap-3">
-                <Lock className="w-5 h-5 text-primary shrink-0" />
-                <div>
-                  <p className="font-semibold text-sm">Log in to claim your rewards</p>
-                  <p className="text-xs text-muted-foreground">Browse rewards below — claiming requires an account.</p>
-                </div>
-              </div>
-              <Button size="sm" onClick={() => navigate(ROUTE_PATHS.LOGIN)}>Log In</Button>
+        {/* Balance Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* FDY Balance */}
+          <Card className="border-2 border-primary/20 bg-primary/5">
+            <CardContent className="p-6">
+              <p className="text-xs text-muted-foreground uppercase tracking-widest mb-1">FDY Balance</p>
+              <p className="text-4xl font-extrabold text-primary">
+                {fdyNum.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                <span className="text-lg font-semibold ml-1 text-primary/70">FDY</span>
+              </p>
+              <p className="text-xs text-muted-foreground mt-2">1 ETH donated = 100 FDY earned</p>
             </CardContent>
           </Card>
-        )}
 
-        {/* Wallet banner */}
-        <Card className={`border-2 ${isConnected ? 'border-emerald-200 bg-emerald-50/40' : 'border-primary/20'}`}>
-          <CardContent className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 py-4">
-            {isConnected ? (
-              <div>
-                <p className="font-semibold text-emerald-700 flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4" /> Wallet connected
+          {/* ETH Balance */}
+          <Card>
+            <CardContent className="p-6">
+              <p className="text-xs text-muted-foreground uppercase tracking-widest mb-1">ETH Balance</p>
+              <div className="flex items-end gap-2">
+                <p className="text-4xl font-extrabold">
+                  {ethNum.toFixed(4)}
+                  <span className="text-lg font-semibold ml-1 text-muted-foreground">ETH</span>
                 </p>
-                <p className="font-mono text-xs text-muted-foreground mt-0.5">{address?.slice(0, 10)}...{address?.slice(-6)}</p>
-                <p className="text-sm mt-1 font-semibold">{ethBalance} ETH · <span className="text-primary">{Number(fdyBalance).toFixed(2)} FDY</span></p>
               </div>
-            ) : (
-              <div>
-                <p className="font-semibold">Connect your MetaMask wallet</p>
-                <p className="text-sm text-muted-foreground mt-0.5">Required to mint and claim on-chain rewards.</p>
-              </div>
-            )}
-            {!isConnected && <Button onClick={connect} className="gap-2 shrink-0">🦊 Connect MetaMask</Button>}
-          </CardContent>
-        </Card>
+              <p className="text-xs text-muted-foreground mt-2">
+                ≈ <span className="font-semibold text-foreground">RM{Number(ethInRm).toLocaleString()}</span>
+              </p>
+            </CardContent>
+          </Card>
+        </div>
 
-        {/* Credit score */}
-        {isAuthenticated && creditScore && <CreditScoreCard score={creditScore} />}
+        {/* Summary Stats */}
+        <div className="grid grid-cols-2 gap-4">
+          <Card>
+            <CardContent className="py-4 text-center">
+              <p className="text-2xl font-bold text-emerald-600">
+                +{totalEarned.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5 flex items-center justify-center gap-1">
+                <TrendingUp className="w-3 h-3" /> Total FDY Earned
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="py-4 text-center">
+              <p className="text-2xl font-bold text-rose-500">
+                -{totalSpent.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5 flex items-center justify-center gap-1">
+                <ArrowUpRight className="w-3 h-3" /> Total FDY Spent
+              </p>
+            </CardContent>
+          </Card>
+        </div>
 
-        {/* Stats */}
-        {isAuthenticated && rewards.length > 0 && (
-          <div className="grid grid-cols-3 gap-4">
-            {[
-              { label: 'Pending', value: pendingCount, color: 'text-amber-600' },
-              { label: 'Ready to Claim', value: mintedCount, color: 'text-blue-600' },
-              { label: 'Claimed', value: claimedCount, color: 'text-emerald-600' },
-            ].map(({ label, value, color }) => (
-              <Card key={label}>
-                <CardContent className="py-4 text-center">
-                  <p className={`text-2xl font-extrabold ${color}`}>{value}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">{label}</p>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
-
-        {/* Rewards grid */}
+        {/* Transaction History */}
         <div>
-          <h2 className="font-bold text-lg mb-4">
-            {isAuthenticated ? 'My Rewards' : 'How Rewards Work'}
-          </h2>
+          <h2 className="font-bold text-lg mb-4">Transaction History</h2>
 
-          {!isAuthenticated ? (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              {[
-                { icon: Coins, title: 'Token Reward', desc: 'Earn FDY tokens for every donation. 1 ETH = 100 FDY.' },
-                { icon: ImageIcon, title: 'NFT Collectible', desc: 'Large donations mint a unique NFT commemorating your support.' },
-                { icon: Gift, title: 'Badge', desc: 'Digital badges for reaching donation milestones.' },
-              ].map(({ icon: Icon, title, desc }) => (
-                <Card key={title} className="border-dashed">
-                  <CardContent className="p-5 text-center space-y-2">
-                    <div className="inline-flex p-3 bg-muted rounded-full">
-                      <Icon className="w-6 h-6 text-muted-foreground" />
-                    </div>
-                    <p className="font-semibold text-sm">{title}</p>
-                    <p className="text-xs text-muted-foreground">{desc}</p>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          ) : isLoading ? (
+          {historyLoading ? (
             <div className="flex justify-center py-16">
               <Loader2 className="w-8 h-8 animate-spin text-primary" />
             </div>
-          ) : rewards.length === 0 ? (
+          ) : txs.length === 0 ? (
             <Card className="border-dashed">
-              <CardContent className="py-16 text-center space-y-3 text-muted-foreground">
+              <CardContent className="py-16 text-center text-muted-foreground space-y-3">
                 <div className="inline-flex p-4 bg-muted rounded-full">
-                  <Gift className="w-10 h-10 opacity-30" />
+                  <Coins className="w-8 h-8 opacity-30" />
                 </div>
-                <p className="font-medium text-lg">No rewards yet</p>
-                <p className="text-sm">Make your first donation to earn FDY tokens and rewards!</p>
+                <p className="font-medium">No FDY transactions yet</p>
+                <p className="text-sm">Donate to a campaign to start earning FDY tokens.</p>
                 <Button variant="outline" onClick={() => navigate(ROUTE_PATHS.CAMPAIGNS)}>
                   Browse Campaigns
                 </Button>
               </CardContent>
             </Card>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-              {rewards.map((reward) => (
-                <RewardCard
-                  key={reward.id}
-                  reward={reward}
-                  onClaim={claimReward}
-                  isLoggedIn={isAuthenticated}
-                  userName={user?.name}
-                />
-              ))}
-            </div>
+            <Card>
+              <CardContent className="p-0 divide-y">
+                {txs.map((tx, i) => {
+                  const meta = TX_META[tx.type];
+                  const Icon = meta.icon;
+                  const fdyDisplay = Number(tx.fdyAmount).toLocaleString(undefined, { maximumFractionDigits: 2 });
+
+                  return (
+                    <motion.div
+                      key={`${tx.txHash}-${i}`}
+                      initial={{ opacity: 0, x: -8 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: i * 0.03 }}
+                      className="flex items-center gap-4 px-4 py-3 hover:bg-muted/30 transition-colors"
+                    >
+                      {/* Icon */}
+                      <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${meta.bg}`}>
+                        <Icon className={`w-4 h-4 ${meta.color}`} />
+                      </div>
+
+                      {/* Label + Campaign */}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold">{meta.label}</p>
+                        <p className="text-xs text-muted-foreground">
+                          Campaign #{tx.campaignId}
+                          {tx.date && (
+                            <span className="ml-2">
+                              · {tx.date.toLocaleDateString('en-MY', { day: 'numeric', month: 'short', year: 'numeric' })}
+                            </span>
+                          )}
+                        </p>
+                      </div>
+
+                      {/* Amount */}
+                      <div className="text-right shrink-0">
+                        <p className={`font-bold text-sm ${meta.color}`}>
+                          {meta.sign}{fdyDisplay} FDY
+                        </p>
+                        <a
+                          href={`https://sepolia.etherscan.io/tx/${tx.txHash}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[10px] text-muted-foreground hover:text-primary transition-colors"
+                        >
+                          {tx.txHash.slice(0, 8)}...
+                        </a>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </CardContent>
+            </Card>
           )}
         </div>
 
-        {/* On-chain NFTs owned by wallet */}
-        {onChainNfts.length > 0 && (
-          <div>
-            <h2 className="font-bold text-lg mb-4 flex items-center gap-2">
-              <ImageIcon className="w-5 h-5 text-violet-500" /> My NFTs (On-chain)
-            </h2>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-              {onChainNfts.map((nft) => (
-                <Card key={nft.tokenId} className="overflow-hidden hover:shadow-md transition-shadow">
-                  <div className="h-32 bg-violet-50 flex items-center justify-center">
-                    <img
-                      src={nft.uri}
-                      alt={`NFT #${nft.tokenId}`}
-                      className="h-full w-full object-contain"
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).style.display = 'none';
-                      }}
-                    />
-                  </div>
-                  <CardContent className="p-3">
-                    <p className="font-semibold text-sm">NFT #{nft.tokenId}</p>
-                    <p className="text-xs text-muted-foreground truncate">{nft.uri}</p>
-                    <Badge variant="outline" className="text-xs mt-1 text-violet-600 border-violet-200">
-                      On-chain
-                    </Badge>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          </div>
-        )}
       </motion.div>
     </div>
   );

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -89,14 +89,14 @@ export default function CampaignDetail() {
             try {
               const block = await provider.getBlock(e.blockNumber);
               if (block) date = new Date(Number(block.timestamp) * 1000);
-            } catch { }
+            } catch {}
             return {
-              address: e.args.donor as string,
-              amount: ethers.formatEther(e.args.amount),
+              address:  e.args.donor as string,
+              amount:   ethers.formatEther(e.args.amount),
               amountRm: (Number(ethers.formatEther(e.args.amount)) / 0.001).toFixed(0),
               date,
-              txHash: e.transactionHash,
-              name: null as string | null, // will be filled below
+              txHash:   e.transactionHash,
+              name:     null as string | null, // will be filled below
             };
           }),
         );
@@ -122,7 +122,7 @@ export default function CampaignDetail() {
                 d.name = nameMap[d.address.toLowerCase()] ?? null;
               });
             }
-          } catch { }
+          } catch {}
         }
 
         if (!cancelled) setOnChainDonors(filtered.reverse());
@@ -163,39 +163,6 @@ export default function CampaignDetail() {
   const progressPercent = Math.min(100, Math.floor((campaign.currentAmount / campaign.goalAmount) * 100));
   const isVerified = campaign.organizer.isVerified;
   const isOwnCampaign = !!user && user.id === campaign.organizer.id;
-  
-
-  const copyToClipboard = (text: string) => {
-    if (navigator.clipboard && window.isSecureContext) {
-      return navigator.clipboard.writeText(text);
-    }
-    const el = document.createElement('textarea');
-    el.value = text;
-    el.style.position = 'fixed';
-    el.style.opacity = '0';
-    document.body.appendChild(el);
-    el.select();
-    document.execCommand('copy');
-    document.body.removeChild(el);
-  };
-
-  const handleShare = async () => {
-  const url = window.location.href;
-  if (navigator.share) {
-    try {
-      await navigator.share({ title: campaign.title, url });
-    } catch (err) {
-      // user cancelled — do nothing
-    }
-  } else {
-    try {
-      await copyToClipboard(url);
-      toast.success('Link copied to clipboard!');
-    } catch (err) {
-      toast.error('Failed to copy link. Please copy it manually from the address bar.');
-    }
-  }
-};
 
   const handleSubmitReport = async () => {
     setIsSubmittingReport(true);
@@ -215,17 +182,6 @@ export default function CampaignDetail() {
       setIsSubmittingReport(false);
     }
   };
-
-  // Group reward tiers by type for vertical sub-tabs
-  const tiersByType = rewardTiers && rewardTiers.length > 0
-    ? rewardTiers.reduce((acc: Record<string, any[]>, tier: any) => {
-      const key = tier.type ?? 'Other';
-      if (!acc[key]) acc[key] = [];
-      acc[key].push(tier);
-      return acc;
-    }, {})
-    : {};
-  const tierTypeKeys = Object.keys(tiersByType);
 
   return (
     <div className="min-h-screen pb-20">
@@ -382,42 +338,27 @@ export default function CampaignDetail() {
 
                 {/* Rewards tab */}
                 <TabsContent value="rewards">
-                  {!rewardTiers || rewardTiers.length === 0 ? (
-                    <div className="text-center py-16 text-muted-foreground">
-                      <Gift className="w-12 h-12 mx-auto mb-4 opacity-20" />
-                      <p className="font-medium">No reward tiers for this campaign.</p>
-                      <p className="text-sm mt-1">The organizer has not set up donation rewards yet.</p>
+                  <div className="space-y-4">
+                    {/* Always-on FDY reward */}
+                    <div className="p-5 bg-blue-50 border border-blue-200 rounded-xl">
+                      <p className="font-semibold text-blue-800 flex items-center gap-2 mb-1">
+                        🪙 Automatic FDY Token Reward <span className="text-xs font-normal bg-blue-100 px-2 py-0.5 rounded-full">Always active</span>
+                      </p>
+                      <p className="text-sm text-blue-700">
+                        Every donor automatically receives FDY tokens — <strong>1 ETH donated = 100 FDY</strong>. FDY can be used to donate on Fundy.
+                      </p>
                     </div>
-                  ) : tierTypeKeys.length > 1 ? (
-                    // Multiple types → vertical sub-tabs
-                    <div className="flex gap-6">
-                      <Tabs defaultValue={tierTypeKeys[0]} orientation="vertical" className="flex gap-6 w-full">
-                        <TabsList className="flex flex-col h-auto w-36 shrink-0 bg-muted/50 p-1 rounded-xl">
-                          {tierTypeKeys.map((type) => (
-                            <TabsTrigger key={type} value={type} className="w-full justify-start text-xs capitalize">
-                              {type === 'ERC20' ? '🪙 Token' : type === 'ERC721' ? '🖼️ NFT' : type === 'badge' ? '🏅 Badge' : type}
-                            </TabsTrigger>
-                          ))}
-                        </TabsList>
-                        <div className="flex-1">
-                          {tierTypeKeys.map((type) => (
-                            <TabsContent key={type} value={type} className="mt-0 space-y-3">
-                              {tiersByType[type].map((tier: any) => (
-                                <RewardTierCard key={tier.id} tier={tier} />
-                              ))}
-                            </TabsContent>
-                          ))}
-                        </div>
-                      </Tabs>
-                    </div>
-                  ) : (
-                    // Single type — just list them
-                    <div className="space-y-4">
-                      {rewardTiers.map((tier: any) => (
-                        <RewardTierCard key={tier.id} tier={tier} />
-                      ))}
-                    </div>
-                  )}
+
+                    {/* Extra FDY reward — read from on-chain */}
+                    {campaign.onChainId ? (
+                      <ExtraFdyRewardCard onChainId={campaign.onChainId} />
+                    ) : (
+                      <div className="text-center py-8 text-muted-foreground">
+                        <Gift className="w-10 h-10 mx-auto mb-3 opacity-20" />
+                        <p className="text-sm">Campaign not yet on-chain.</p>
+                      </div>
+                    )}
+                  </div>
                 </TabsContent>
 
                 {/* Updates tab */}
@@ -494,6 +435,14 @@ export default function CampaignDetail() {
                       >
                         <Heart className="mr-2 w-5 h-5 fill-current" />
                         {t('btn_donate')}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="lg"
+                        className="w-full h-14 text-lg font-bold"
+                      >
+                        <Share2 className="mr-2 w-5 h-5" />
+                        {t('btn_share')}
                       </Button>
                     </div>
 
@@ -642,34 +591,50 @@ export default function CampaignDetail() {
   );
 }
 
-// ── Reward Tier Card sub-component ────────────────────────────
+// ── Extra FDY Reward Card — reads live from chain ─────────────
 
-function RewardTierCard({ tier }: { tier: any }) {
-  const typeLabel: Record<string, string> = {
-    ERC20: '🪙 Token Reward',
-    ERC721: '🖼️ NFT Reward',
-    badge: '🏅 Badge',
-  };
+function ExtraFdyRewardCard({ onChainId }: { onChainId: number }) {
+  const { provider } = useWeb3();
+  const [info, setInfo] = React.useState<{ hasExtra: boolean; amount: string; minDonate: string } | null>(null);
+
+  React.useEffect(() => {
+    if (!provider || !onChainId) return;
+    (async () => {
+      try {
+        const contract = new ethers.Contract(CONTRACT_ADDRESSES.crowdfunding, CROWDFUNDING_ABI, provider);
+        const c = await contract.getCampaign(onChainId);
+        setInfo({
+          hasExtra:  c.hasExtraToken,
+          amount:    ethers.formatEther(c.extraTokenAmount),
+          minDonate: (Number(ethers.formatEther(c.extraTokenMinDonate)) / 0.001).toFixed(0),
+        });
+      } catch {}
+    })();
+  }, [provider, onChainId]);
+
+  if (!info) return (
+    <div className="p-5 border rounded-xl flex items-center gap-3 text-muted-foreground text-sm">
+      <Loader2 className="w-4 h-4 animate-spin" /> Loading reward info...
+    </div>
+  );
+
+  if (!info.hasExtra) return (
+    <div className="p-5 border border-dashed rounded-xl text-center text-muted-foreground text-sm">
+      <Gift className="w-8 h-8 mx-auto mb-2 opacity-20" />
+      No extra FDY reward for this campaign.
+    </div>
+  );
+
   return (
-    <div className="border rounded-xl p-5 hover:border-primary/40 transition-colors">
-      <div className="flex items-start justify-between gap-3 mb-2">
-        <div>
-          <p className="font-bold">{tier.name}</p>
-          <p className="text-xs text-muted-foreground mt-0.5">{typeLabel[tier.type] ?? tier.type}</p>
-        </div>
-        <Badge variant="outline" className="shrink-0 text-sm font-semibold">
-          RM{tier.minAmount}+
-        </Badge>
-      </div>
-      {tier.description && (
-        <p className="text-sm text-foreground/70 mt-2">{tier.description}</p>
-      )}
-      {tier.quantity && (
-        <p className="text-xs text-muted-foreground mt-2">Limited to {tier.quantity} supporters</p>
-      )}
-      {tier.tokenAmount && (
-        <p className="text-xs text-primary font-medium mt-1">+{tier.tokenAmount} tokens</p>
-      )}
+    <div className="p-5 bg-amber-50 border border-amber-200 rounded-xl space-y-2">
+      <p className="font-semibold text-amber-900 flex items-center gap-2">
+        🎁 Extra FDY Token Reward
+        <span className="text-xs font-normal bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Active</span>
+      </p>
+      <p className="text-sm text-amber-800">
+        Donate <strong>RM{info.minDonate}+</strong> and receive an extra <strong>{Number(info.amount).toLocaleString()} FDY</strong> tokens on top of the automatic reward.
+      </p>
+      <p className="text-xs text-amber-600">FDY tokens are funded by the campaign organizer and distributed automatically on-chain.</p>
     </div>
   );
 }

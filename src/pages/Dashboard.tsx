@@ -554,18 +554,6 @@ export default function Dashboard() {
                               <Settings className="w-3 h-3 mr-1" /> Manage
                             </Button>
                           </div>
-                          {campaign.status === 'active' && (
-                            <div className="flex gap-2">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="flex-1 text-destructive hover:text-destructive text-xs"
-                                onClick={() => {/* Cancel campaign logic */ }}
-                              >
-                                Cancel Campaign
-                              </Button>
-                            </div>
-                          )}
                         </CardContent>
                       </Card>
                     );

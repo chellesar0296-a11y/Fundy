@@ -16,8 +16,11 @@ import {
 } from '@/components/ui/dialog';
 import {
   ArrowLeft, Loader2, Gift, MessageCircle, TrendingUp,
-  Send, ImagePlus, Trash2, Edit, Save, Info, Clock, XCircle, CheckCircle2, Ban,
+  Send, ImagePlus, Trash2, Edit, Save, Info, Clock, XCircle, CheckCircle2,
+  Wallet, AlertTriangle,
 } from 'lucide-react';
+import { useWeb3, CROWDFUNDING_ABI, CONTRACT_ADDRESSES } from '@/context/Web3Context';
+import { ethers } from 'ethers';
 import {
   createCampaignUpdate,
   getCampaignUpdates,
@@ -28,7 +31,52 @@ import {
   DbCancelRequest,
 } from '@/lib/supabase';
 
-// ── Cancel Request Dialog ─────────────────────────────────────
+// ── Extra FDY Reward Card — reads live from chain ─────────────
+function ExtraFdyRewardCard({ onChainId }: { onChainId: number }) {
+  const { provider } = useWeb3();
+  const [info, setInfo] = React.useState<{ hasExtra: boolean; amount: string; minDonate: string } | null>(null);
+
+  React.useEffect(() => {
+    if (!provider || !onChainId) return;
+    (async () => {
+      try {
+        const contract = new ethers.Contract(CONTRACT_ADDRESSES.crowdfunding, CROWDFUNDING_ABI, provider);
+        const c = await contract.getCampaign(onChainId);
+        setInfo({
+          hasExtra:  c.hasExtraToken,
+          amount:    ethers.formatEther(c.extraTokenAmount),
+          minDonate: (Number(ethers.formatEther(c.extraTokenMinDonate)) / 0.001).toFixed(0),
+        });
+      } catch {}
+    })();
+  }, [provider, onChainId]);
+
+  if (!info) return (
+    <div className="p-5 border rounded-xl flex items-center gap-3 text-muted-foreground text-sm">
+      <Loader2 className="w-4 h-4 animate-spin" /> Loading reward info...
+    </div>
+  );
+
+  if (!info.hasExtra) return (
+    <div className="p-5 border border-dashed rounded-xl text-center text-muted-foreground text-sm">
+      <Gift className="w-8 h-8 mx-auto mb-2 opacity-20" />
+      No extra FDY reward for this campaign.
+    </div>
+  );
+
+  return (
+    <div className="p-5 bg-amber-50 border border-amber-200 rounded-xl space-y-2">
+      <p className="font-semibold text-amber-900 flex items-center gap-2">
+        🎁 Extra FDY Token Reward
+        <span className="text-xs font-normal bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Active</span>
+      </p>
+      <p className="text-sm text-amber-800">
+        Donate <strong>RM{info.minDonate}+</strong> and receive an extra <strong>{Number(info.amount).toLocaleString()} FDY</strong> tokens on top of the automatic reward.
+      </p>
+      <p className="text-xs text-amber-600">FDY tokens are funded by the campaign organizer and distributed automatically on-chain.</p>
+    </div>
+  );
+}
 function CancelRequestDialog({
   open,
   onClose,
@@ -133,6 +181,7 @@ function CancelRequestDialog({
               onClick={async () => {
                 setIsSubmitting(true);
                 try {
+                  // submitCancelRequest is called from parent which has campaignId + userId
                   onSubmitted({ reason } as any);
                 } finally {
                   setIsSubmitting(false);
@@ -151,28 +200,19 @@ function CancelRequestDialog({
   );
 }
 
-// ── Cancelled Banner ──────────────────────────────────────────
-function CancelledBanner() {
-  return (
-    <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">
-      <Ban className="w-5 h-5 shrink-0 mt-0.5 text-red-500" />
-      <div>
-        <p className="font-semibold">This campaign has been cancelled</p>
-        <p className="mt-0.5 text-red-700">
-          Editing and posting updates are disabled. ETH donations are now refundable on-chain.
-        </p>
-      </div>
-    </div>
-  );
-}
-
 // ── Main ──────────────────────────────────────────────────────
 export default function CampaignManage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { campaign, isLoading, rewardTiers } = useCampaign(id ?? '');
+  const { campaign, isLoading } = useCampaign(id ?? '');
+  const { withdrawFunds, getCampaignOnChain, isConnected, connect } = useWeb3();
   const [activeTab, setActiveTab] = useState('overview');
+
+  // Withdrawal state
+  const [isWithdrawing, setIsWithdrawing]       = useState(false);
+  const [onChainData, setOnChainData]           = useState<any>(null);
+  const [loadingOnChain, setLoadingOnChain]     = useState(false);
 
   // Update post state
   const [updateTitle, setUpdateTitle] = useState('');
@@ -224,11 +264,39 @@ export default function CampaignManage() {
     }
   }, [id]);
 
-  const isOrganizer = campaign?.organizer.id === user?.id;
+  // Fetch on-chain campaign data (balance, withdrawn flag, goal reached)
+  React.useEffect(() => {
+    if (!campaign?.onChainId) return;
+    setLoadingOnChain(true);
+    getCampaignOnChain(campaign.onChainId)
+      .then(setOnChainData)
+      .catch(() => setOnChainData(null))
+      .finally(() => setLoadingOnChain(false));
+  }, [campaign?.onChainId]);
 
-  // ── Derived: is this campaign fully cancelled? ──────────────
-  const isCancelled =
-    campaign?.status === 'cancelled' || cancelRequest?.status === 'approved';
+  const handleWithdraw = async () => {
+    if (!campaign?.onChainId) return;
+    if (!isConnected) {
+      toast.error('Please connect your wallet first.');
+      await connect();
+      return;
+    }
+    setIsWithdrawing(true);
+    try {
+      await withdrawFunds(campaign.onChainId);
+      toast.success('Funds withdrawn successfully!');
+      // Refresh on-chain data
+      const updated = await getCampaignOnChain(campaign.onChainId);
+      setOnChainData(updated);
+    } catch (err: any) {
+      const msg = err?.reason ?? err?.message ?? 'Withdrawal failed';
+      toast.error(msg);
+    } finally {
+      setIsWithdrawing(false);
+    }
+  };
+
+  const isOrganizer = campaign?.organizer.id === user?.id;
 
   if (!isOrganizer && !isLoading) {
     return (
@@ -251,7 +319,6 @@ export default function CampaignManage() {
   }
 
   const handlePostUpdate = async () => {
-    if (isCancelled) return;
     if (!updateTitle.trim() || !updateContent.trim()) {
       toast.error('Please fill in both title and content');
       return;
@@ -291,7 +358,6 @@ export default function CampaignManage() {
   };
 
   const handleSaveCampaign = async () => {
-    if (isCancelled) return;
     if (!editTitle.trim()) { toast.error('Title cannot be empty'); return; }
     setIsSaving(true);
     try {
@@ -338,7 +404,7 @@ export default function CampaignManage() {
   // Cancel request status badge
   const cancelRequestBadge = cancelRequest ? {
     pending:  <Badge className="bg-amber-100 text-amber-700 border-0 text-xs">Cancel Pending Review</Badge>,
-    approved: <Badge className="bg-red-100 text-red-700 border-0 text-xs">Cancelled</Badge>,
+    approved: <Badge className="bg-red-100 text-red-700 border-0 text-xs">Cancel Approved</Badge>,
     rejected: <Badge className="bg-slate-100 text-slate-600 border-0 text-xs">Cancel Rejected</Badge>,
   }[cancelRequest.status] : null;
 
@@ -349,14 +415,8 @@ export default function CampaignManage() {
           <ArrowLeft className="w-4 h-4 mr-2" /> Back
         </Button>
         <h1 className="text-2xl font-bold">Manage Campaign</h1>
-        <Badge className={
-          isCancelled
-            ? 'bg-red-100 text-red-700'
-            : campaign.status === 'active'
-              ? 'bg-emerald-100 text-emerald-700'
-              : 'bg-slate-100 text-slate-600'
-        }>
-          {isCancelled ? 'cancelled' : campaign.status}
+        <Badge className={campaign.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}>
+          {campaign.status}
         </Badge>
         {cancelRequestBadge}
       </div>
@@ -364,7 +424,7 @@ export default function CampaignManage() {
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {/* Sidebar */}
         <div className="lg:col-span-1 space-y-4">
-          <Card className={isCancelled ? 'opacity-75' : ''}>
+          <Card>
             <CardContent className="p-4 space-y-2">
               <img
                 src={campaign.image}
@@ -389,28 +449,92 @@ export default function CampaignManage() {
                 <span className="font-semibold">{campaign.donorCount}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Reward Tiers</span>
-                <span className="font-semibold">{rewardTiers?.length || 0}</span>
-              </div>
-              <div className="flex justify-between">
                 <span className="text-muted-foreground">Updates</span>
                 <span className="font-semibold">{updates.length}</span>
               </div>
             </CardContent>
           </Card>
 
-          {/* Cancel / status card */}
-          <Card className={isCancelled ? 'border-red-200 bg-red-50/40' : 'border-destructive/20'}>
+          {/* Withdraw Funds */}
+          {campaign.onChainId && (() => {
+            const totalRaisedEth = onChainData ? Number(ethers.formatEther(onChainData.totalRaisedEth)) : 0;
+            const goalEth        = onChainData ? Number(ethers.formatEther(onChainData.goalAmount))     : 0;
+            const totalRaisedRm  = (totalRaisedEth * 1000).toFixed(0);
+            const goalRm         = (goalEth * 1000).toFixed(0);
+            const goalReached    = onChainData ? (onChainData.totalRaisedEth + onChainData.totalRaisedFdy >= onChainData.goalAmount) : false;
+            const alreadyWithdrawn = onChainData?.withdrawn ?? false;
+            const cancelled      = onChainData?.cancelled ?? false;
+
+            return (
+              <Card className="border-primary/20">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm flex items-center gap-2">
+                    <Wallet className="w-4 h-4 text-primary" /> Withdraw Funds
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {loadingOnChain ? (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Loader2 className="w-3 h-3 animate-spin" /> Loading on-chain data...
+                    </div>
+                  ) : onChainData ? (
+                    <>
+                      <div className="space-y-1 text-xs">
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Total Raised</span>
+                          <span className="font-semibold">RM{Number(totalRaisedRm).toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Goal</span>
+                          <span className="font-semibold">RM{Number(goalRm).toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Status</span>
+                          <span className={`font-semibold ${alreadyWithdrawn ? 'text-muted-foreground' : goalReached ? 'text-emerald-600' : 'text-amber-600'}`}>
+                            {alreadyWithdrawn ? 'Withdrawn' : goalReached ? 'Ready to withdraw' : 'Goal not reached'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {!alreadyWithdrawn && !cancelled && goalReached && (
+                        <Button
+                          size="sm"
+                          className="w-full"
+                          onClick={handleWithdraw}
+                          disabled={isWithdrawing}
+                        >
+                          {isWithdrawing
+                            ? <><Loader2 className="w-3 h-3 animate-spin mr-2" /> Withdrawing...</>
+                            : <><Wallet className="w-3 h-3 mr-2" /> Withdraw Funds</>}
+                        </Button>
+                      )}
+
+                      {!alreadyWithdrawn && !cancelled && !goalReached && (
+                        <div className="flex items-start gap-2 p-2 bg-amber-50 border border-amber-200 rounded-lg text-[10px] text-amber-700">
+                          <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5 text-amber-500" />
+                          Goal not yet reached. Withdrawal will be available once the goal is met.
+                        </div>
+                      )}
+
+                      {alreadyWithdrawn && (
+                        <div className="flex items-center gap-2 p-2 bg-muted/40 rounded-lg text-[10px] text-muted-foreground">
+                          <CheckCircle2 className="w-3 h-3 text-emerald-500" />
+                          Funds have been successfully withdrawn.
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-[10px] text-muted-foreground">Unable to load on-chain data.</p>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })()}
+
+          {/* Cancel button — submits a request, not an immediate cancel */}
+          <Card className="border-destructive/20">
             <CardContent className="p-4">
-              {isCancelled ? (
-                <div className="flex flex-col items-center gap-2 text-center">
-                  <Ban className="w-5 h-5 text-red-500" />
-                  <p className="text-xs font-semibold text-red-700">Campaign Cancelled</p>
-                  <p className="text-[10px] text-red-500">
-                    ETH donations are now refundable on-chain.
-                  </p>
-                </div>
-              ) : cancelRequest?.status === 'pending' ? (
+              {cancelRequest?.status === 'pending' ? (
                 <Button
                   variant="outline"
                   size="sm"
@@ -420,6 +544,10 @@ export default function CampaignManage() {
                   <Clock className="w-3 h-3 mr-2" />
                   View Cancel Request
                 </Button>
+              ) : cancelRequest?.status === 'approved' ? (
+                <p className="text-xs text-center text-destructive font-medium">
+                  This campaign has been cancelled.
+                </p>
               ) : (
                 <Button
                   variant="destructive"
@@ -434,11 +562,9 @@ export default function CampaignManage() {
                   Request Cancellation
                 </Button>
               )}
-              {!isCancelled && (
-                <p className="text-[10px] text-muted-foreground text-center mt-2">
-                  Cancellation requires admin approval
-                </p>
-              )}
+              <p className="text-[10px] text-muted-foreground text-center mt-2">
+                Cancellation requires admin approval
+              </p>
             </CardContent>
           </Card>
         </div>
@@ -460,8 +586,6 @@ export default function CampaignManage() {
 
             {/* Overview Tab */}
             <TabsContent value="overview" className="space-y-6">
-              {isCancelled && <CancelledBanner />}
-
               <Card>
                 <CardHeader>
                   <CardTitle>Campaign Performance</CardTitle>
@@ -481,36 +605,28 @@ export default function CampaignManage() {
                 </CardContent>
               </Card>
 
-              <Card className={isCancelled ? 'opacity-60 pointer-events-none' : ''}>
+              <Card>
                 <CardHeader className="flex flex-row items-center justify-between">
                   <div>
                     <CardTitle>Campaign Details</CardTitle>
-                    <CardDescription>
-                      {isCancelled
-                        ? 'Editing is disabled for cancelled campaigns'
-                        : "Edit your campaign's information"}
-                    </CardDescription>
+                    <CardDescription>Edit your campaign's information</CardDescription>
                   </div>
-                  {/* Hide edit controls entirely when cancelled */}
-                  {!isCancelled && (
-                    !isEditMode ? (
-                      <Button variant="outline" size="sm" onClick={() => setIsEditMode(true)}>
-                        <Edit className="w-3 h-3 mr-2" /> Edit
+                  {!isEditMode ? (
+                    <Button variant="outline" size="sm" onClick={() => setIsEditMode(true)}>
+                      <Edit className="w-3 h-3 mr-2" /> Edit
+                    </Button>
+                  ) : (
+                    <div className="flex gap-2">
+                      <Button variant="ghost" size="sm" onClick={() => setIsEditMode(false)}>Cancel</Button>
+                      <Button size="sm" onClick={handleSaveCampaign} disabled={isSaving}>
+                        {isSaving ? <Loader2 className="w-3 h-3 animate-spin mr-2" /> : <Save className="w-3 h-3 mr-2" />}
+                        Save
                       </Button>
-                    ) : (
-                      <div className="flex gap-2">
-                        <Button variant="ghost" size="sm" onClick={() => setIsEditMode(false)}>Cancel</Button>
-                        <Button size="sm" onClick={handleSaveCampaign} disabled={isSaving}>
-                          {isSaving ? <Loader2 className="w-3 h-3 animate-spin mr-2" /> : <Save className="w-3 h-3 mr-2" />}
-                          Save
-                        </Button>
-                      </div>
-                    )
+                    </div>
                   )}
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {/* Always show read-only view when cancelled, regardless of isEditMode */}
-                  {(!isEditMode || isCancelled) ? (
+                  {!isEditMode ? (
                     <>
                       <div>
                         <p className="text-xs text-muted-foreground mb-1">Title</p>
@@ -553,7 +669,7 @@ export default function CampaignManage() {
                       </div>
                       <div className="flex items-start gap-2 p-3 bg-muted/40 rounded-lg text-xs text-muted-foreground">
                         <Info className="w-4 h-4 shrink-0 mt-0.5" />
-                        The goal amount and reward tiers cannot be modified after creation to protect your backers.
+                        The goal amount cannot be modified after creation to protect your backers.
                       </div>
                     </>
                   )}
@@ -582,152 +698,100 @@ export default function CampaignManage() {
 
             {/* Post Update Tab */}
             <TabsContent value="updates" className="space-y-6">
-              {isCancelled ? (
-                <>
-                  <CancelledBanner />
-                  {/* Read-only list of past updates when cancelled */}
-                  {updates.length > 0 && (
-                    <Card>
-                      <CardHeader><CardTitle>Previous Updates</CardTitle></CardHeader>
-                      <CardContent className="space-y-4">
-                        {updates.map((update: any) => (
-                          <div key={update.id} className="border rounded-lg p-4">
-                            <p className="font-semibold">{update.title}</p>
-                            <p className="text-xs text-muted-foreground">{new Date(update.created_at).toLocaleDateString()}</p>
-                            <p className="text-sm mt-2 whitespace-pre-wrap">{update.content}</p>
-                          </div>
-                        ))}
-                      </CardContent>
-                    </Card>
-                  )}
-                </>
-              ) : (
-                <>
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Share an Update</CardTitle>
-                      <CardDescription>Keep your supporters informed about campaign progress.</CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <div className="space-y-2">
-                        <Label>Update Title</Label>
-                        <Input
-                          placeholder="e.g., We've reached 50% of our goal!"
-                          value={updateTitle}
-                          onChange={(e) => setUpdateTitle(e.target.value)}
-                        />
+              <Card>
+                <CardHeader>
+                  <CardTitle>Share an Update</CardTitle>
+                  <CardDescription>Keep your supporters informed about campaign progress.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <Label>Update Title</Label>
+                    <Input placeholder="e.g., We've reached 50% of our goal!" value={updateTitle} onChange={(e) => setUpdateTitle(e.target.value)} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Update Content</Label>
+                    <Textarea placeholder="Share the latest news about your campaign..." rows={6} value={updateContent} onChange={(e) => setUpdateContent(e.target.value)} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Add Image (Optional)</Label>
+                    {mediaPreview ? (
+                      <div className="relative">
+                        <img src={mediaPreview} alt="Preview" className="w-full h-48 object-contain rounded-lg border bg-muted/30" />
+                        <button type="button" onClick={() => { setMediaFile(null); setMediaPreview(null); }}
+                          className="absolute top-2 right-2 bg-destructive text-white rounded-full w-6 h-6 flex items-center justify-center text-xs hover:bg-destructive/80">
+                          ✕
+                        </button>
                       </div>
-                      <div className="space-y-2">
-                        <Label>Update Content</Label>
-                        <Textarea
-                          placeholder="Share the latest news about your campaign..."
-                          rows={6}
-                          value={updateContent}
-                          onChange={(e) => setUpdateContent(e.target.value)}
-                        />
+                    ) : (
+                      <label className="flex flex-col items-center justify-center border-2 border-dashed rounded-lg p-6 text-center text-muted-foreground cursor-pointer hover:border-primary/50 hover:bg-muted/30 transition-colors">
+                        <ImagePlus className="w-8 h-8 mx-auto mb-2" />
+                        <p className="text-sm font-medium">Click to upload an image</p>
+                        <p className="text-xs mt-1">JPG, PNG, GIF up to 5MB</p>
+                        <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          if (file.size > 5 * 1024 * 1024) { toast.error('File size must be under 5MB'); return; }
+                          setMediaFile(file);
+                          setMediaPreview(URL.createObjectURL(file));
+                        }} />
+                      </label>
+                    )}
+                  </div>
+                  <Button onClick={handlePostUpdate} disabled={isPostingUpdate || isUploadingMedia} className="w-full">
+                    {isUploadingMedia ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Uploading image...</>
+                      : isPostingUpdate ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Publishing...</>
+                      : <><Send className="w-4 h-4 mr-2" /> Publish Update</>}
+                  </Button>
+                </CardContent>
+              </Card>
+              {updates.length > 0 && (
+                <Card>
+                  <CardHeader><CardTitle>Previous Updates</CardTitle></CardHeader>
+                  <CardContent className="space-y-4">
+                    {updates.map((update: any) => (
+                      <div key={update.id} className="border rounded-lg p-4">
+                        <p className="font-semibold">{update.title}</p>
+                        <p className="text-xs text-muted-foreground">{new Date(update.created_at).toLocaleDateString()}</p>
+                        <p className="text-sm mt-2 whitespace-pre-wrap">{update.content}</p>
                       </div>
-                      <div className="space-y-2">
-                        <Label>Add Image (Optional)</Label>
-                        {mediaPreview ? (
-                          <div className="relative">
-                            <img src={mediaPreview} alt="Preview" className="w-full h-48 object-contain rounded-lg border bg-muted/30" />
-                            <button
-                              type="button"
-                              onClick={() => { setMediaFile(null); setMediaPreview(null); }}
-                              className="absolute top-2 right-2 bg-destructive text-white rounded-full w-6 h-6 flex items-center justify-center text-xs hover:bg-destructive/80"
-                            >
-                              ✕
-                            </button>
-                          </div>
-                        ) : (
-                          <label className="flex flex-col items-center justify-center border-2 border-dashed rounded-lg p-6 text-center text-muted-foreground cursor-pointer hover:border-primary/50 hover:bg-muted/30 transition-colors">
-                            <ImagePlus className="w-8 h-8 mx-auto mb-2" />
-                            <p className="text-sm font-medium">Click to upload an image</p>
-                            <p className="text-xs mt-1">JPG, PNG, GIF up to 5MB</p>
-                            <input
-                              type="file"
-                              accept="image/*"
-                              className="hidden"
-                              onChange={(e) => {
-                                const file = e.target.files?.[0];
-                                if (!file) return;
-                                if (file.size > 5 * 1024 * 1024) { toast.error('File size must be under 5MB'); return; }
-                                setMediaFile(file);
-                                setMediaPreview(URL.createObjectURL(file));
-                              }}
-                            />
-                          </label>
-                        )}
-                      </div>
-                      <Button
-                        onClick={handlePostUpdate}
-                        disabled={isPostingUpdate || isUploadingMedia}
-                        className="w-full"
-                      >
-                        {isUploadingMedia
-                          ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Uploading image...</>
-                          : isPostingUpdate
-                            ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Publishing...</>
-                            : <><Send className="w-4 h-4 mr-2" /> Publish Update</>}
-                      </Button>
-                    </CardContent>
-                  </Card>
-
-                  {updates.length > 0 && (
-                    <Card>
-                      <CardHeader><CardTitle>Previous Updates</CardTitle></CardHeader>
-                      <CardContent className="space-y-4">
-                        {updates.map((update: any) => (
-                          <div key={update.id} className="border rounded-lg p-4">
-                            <p className="font-semibold">{update.title}</p>
-                            <p className="text-xs text-muted-foreground">{new Date(update.created_at).toLocaleDateString()}</p>
-                            <p className="text-sm mt-2 whitespace-pre-wrap">{update.content}</p>
-                          </div>
-                        ))}
-                      </CardContent>
-                    </Card>
-                  )}
-                </>
+                    ))}
+                  </CardContent>
+                </Card>
               )}
             </TabsContent>
 
-            {/* Rewards Tab — read-only, no change needed */}
+            {/* Rewards Tab */}
             <TabsContent value="rewards" className="space-y-6">
-              {isCancelled && <CancelledBanner />}
-              <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
-                <Info className="w-5 h-5 shrink-0 mt-0.5 text-amber-600" />
-                <div>
-                  <p className="font-semibold">Reward tiers are locked after campaign creation</p>
-                  <p className="mt-0.5 text-amber-700">Reward tiers cannot be edited once the campaign is live. Contact support to add new tiers.</p>
-                </div>
-              </div>
+              {/* FDY Rewards */}
               <Card>
                 <CardHeader>
-                  <CardTitle>Reward Tiers</CardTitle>
-                  <CardDescription>Your campaign's current reward structure</CardDescription>
+                  <CardTitle>Token Rewards</CardTitle>
+                  <CardDescription>FDY token rewards automatically given to donors</CardDescription>
                 </CardHeader>
-                <CardContent>
-                  {rewardTiers && rewardTiers.length > 0 ? (
-                    <div className="space-y-3">
-                      {rewardTiers.map((tier: any) => (
-                        <div key={tier.id} className="border rounded-lg p-4 bg-muted/20">
-                          <div className="flex justify-between items-start">
-                            <div>
-                              <p className="font-semibold">{tier.name}</p>
-                              <p className="text-sm text-muted-foreground">Minimum RM{tier.minAmount}</p>
-                              <p className="text-sm mt-1">{tier.description}</p>
-                            </div>
-                            <Badge variant="outline" className="shrink-0">{tier.type}</Badge>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                <CardContent className="space-y-4">
+                  {/* Always-on FDY reward */}
+                  <div className="p-5 bg-blue-50 border border-blue-200 rounded-xl">
+                    <p className="font-semibold text-blue-800 flex items-center gap-2 mb-1">
+                      🪙 Automatic FDY Token Reward <span className="text-xs font-normal bg-blue-100 px-2 py-0.5 rounded-full">Always active</span>
+                    </p>
+                    <p className="text-sm text-blue-700">
+                      Every donor automatically receives FDY tokens — <strong>1 ETH donated = 100 FDY</strong>. FDY can be used to donate on Fundy.
+                    </p>
+                  </div>
+
+                  {/* Extra FDY reward — read from on-chain */}
+                  {campaign.onChainId ? (
+                    <ExtraFdyRewardCard onChainId={campaign.onChainId} />
                   ) : (
-                    <p className="text-center text-muted-foreground py-8">No reward tiers configured</p>
+                    <div className="text-center py-8 text-muted-foreground">
+                      <Gift className="w-10 h-10 mx-auto mb-3 opacity-20" />
+                      <p className="text-sm">Campaign not yet on-chain.</p>
+                    </div>
                   )}
                 </CardContent>
               </Card>
             </TabsContent>
+
           </Tabs>
         </div>
       </div>
