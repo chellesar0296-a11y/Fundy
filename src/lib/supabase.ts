@@ -301,6 +301,7 @@ export async function updateCampaign(
     goal_amount?: number;
     image_url?: string | null;
     end_date?: string;
+    status?: string;
   }
 ) {
   const { data, error } = await supabase

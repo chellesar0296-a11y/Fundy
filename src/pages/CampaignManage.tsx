@@ -275,26 +275,36 @@ export default function CampaignManage() {
   }, [campaign?.onChainId]);
 
   const handleWithdraw = async () => {
-    if (!campaign?.onChainId) return;
-    if (!isConnected) {
-      toast.error('Please connect your wallet first.');
-      await connect();
-      return;
-    }
-    setIsWithdrawing(true);
-    try {
-      await withdrawFunds(campaign.onChainId);
-      toast.success('Funds withdrawn successfully!');
-      // Refresh on-chain data
-      const updated = await getCampaignOnChain(campaign.onChainId);
-      setOnChainData(updated);
-    } catch (err: any) {
-      const msg = err?.reason ?? err?.message ?? 'Withdrawal failed';
-      toast.error(msg);
-    } finally {
-      setIsWithdrawing(false);
-    }
-  };
+  if (!campaign?.onChainId) return;
+  if (!isConnected) {
+    toast.error('Please connect your wallet first.');
+    await connect();
+    return;
+  }
+  setIsWithdrawing(true);
+  try {
+    await withdrawFunds(campaign.onChainId);
+    toast.success('Funds withdrawn successfully!');
+    
+    // ✅ UPDATE CAMPAIGN STATUS TO 'completed' HERE
+    await updateCampaign(id!, {
+      status: 'completed'
+    });
+    
+    // Refresh on-chain data
+    const updated = await getCampaignOnChain(campaign.onChainId);
+    setOnChainData(updated);
+    
+    // Optional: Show additional message
+    toast.success('Campaign marked as completed!');
+    
+  } catch (err: any) {
+    const msg = err?.reason ?? err?.message ?? 'Withdrawal failed';
+    toast.error(msg);
+  } finally {
+    setIsWithdrawing(false);
+  }
+};
 
   const isOrganizer = campaign?.organizer.id === user?.id;
 
