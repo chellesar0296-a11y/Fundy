@@ -19,9 +19,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { toast } from 'sonner';
 
 const LEVEL_COLORS: Record<string, string> = {
-  Bronze:   'text-amber-700 bg-amber-100 border-amber-200',
-  Silver:   'text-slate-600 bg-slate-100 border-slate-200',
-  Gold:     'text-yellow-700 bg-yellow-100 border-yellow-200',
+  Bronze: 'text-amber-700 bg-amber-100 border-amber-200',
+  Silver: 'text-slate-600 bg-slate-100 border-slate-200',
+  Gold: 'text-yellow-700 bg-yellow-100 border-yellow-200',
   Platinum: 'text-violet-700 bg-violet-100 border-violet-200',
 };
 
@@ -35,9 +35,9 @@ const TYPE_LABEL: Record<string, string> = {
 
 const STATUS_COLOR: Record<string, string> = {
   pending: 'bg-amber-100 text-amber-700',
-  minted:  'bg-blue-100 text-blue-700',
+  minted: 'bg-blue-100 text-blue-700',
   claimed: 'bg-emerald-100 text-emerald-700',
-  failed:  'bg-red-100 text-red-700',
+  failed: 'bg-red-100 text-red-700',
 };
 
 // ── Credit Score ──────────────────────────────────────────────
@@ -107,7 +107,7 @@ function RewardCard({ reward, onClaim, isLoggedIn, userName }: {
     e?.stopPropagation();
     const text = `🎖️ I just earned "${reward.name}" on Fundy!\n\nI donated to "${reward.campaignTitle}" and received this reward.${userName ? `\n\n— ${userName}` : ''}\n\nJoin me on Fundy! 🌟`;
     if (navigator.share) {
-      navigator.share({ title: `Fundy Reward — ${reward.name}`, text }).catch(() => {});
+      navigator.share({ title: `Fundy Reward — ${reward.name}`, text }).catch(() => { });
     } else {
       navigator.clipboard.writeText(text);
       toast.success('Share text copied to clipboard!');
@@ -148,7 +148,7 @@ function RewardCard({ reward, onClaim, isLoggedIn, userName }: {
               <Button size="sm" className="w-full" onClick={handleClaim} disabled={claiming || !isLoggedIn}>
                 {claiming ? <><Loader2 className="w-3 h-3 animate-spin mr-1" />Claiming...</>
                   : !isLoggedIn ? <><Lock className="w-3 h-3 mr-1" />Login to Claim</>
-                  : <><Zap className="w-3 h-3 mr-1" />Claim Reward</>}
+                    : <><Zap className="w-3 h-3 mr-1" />Claim Reward</>}
               </Button>
             )}
             {reward.status === 'claimed' && (
@@ -246,14 +246,36 @@ export default function Rewards() {
           const tokenId = await nftContract.tokenOfOwnerByIndex(address, i);
           const uri = await nftContract.tokenURI(tokenId);
           nfts.push({ tokenId: Number(tokenId), uri });
-        } catch {}
+        } catch { }
       }
       setOnChainNfts(nfts);
-    }).catch(() => {});
+    }).catch(() => { });
   }, [isConnected, address, provider]);
 
   if (authLoading) {
     return <div className="min-h-[60vh] flex items-center justify-center"><Loader2 className="w-10 h-10 animate-spin text-primary" /></div>;
+  }
+  // Early return AFTER all hooks — auth gate
+  if (!isAuthenticated && !authLoading) {
+    return (
+      <div className="min-h-[80vh] flex flex-col items-center justify-center p-6 text-center">
+        <div className="bg-accent/20 p-6 rounded-full mb-6">
+          <Gift className="w-16 h-16 text-primary" />
+        </div>
+        <h2 className="text-3xl font-bold mb-4">Authentication Required</h2>
+        <p className="text-muted-foreground max-w-md mb-8">
+          Please log in to view your rewards and claim your FDY tokens.
+        </p>
+        <div className="flex gap-4">
+          <Button onClick={() => navigate(ROUTE_PATHS.LOGIN)} size="lg">
+            Log In
+          </Button>
+          <Button onClick={() => navigate(ROUTE_PATHS.HOME)} variant="outline" size="lg">
+            Back to Home
+          </Button>
+        </div>
+      </div>
+    );
   }
 
   // Must be connected to see rewards
@@ -283,7 +305,7 @@ export default function Rewards() {
   }
 
   const pendingCount = rewards.filter(r => r.status === 'pending').length;
-  const mintedCount  = rewards.filter(r => r.status === 'minted').length;
+  const mintedCount = rewards.filter(r => r.status === 'minted').length;
   const claimedCount = rewards.filter(r => r.status === 'claimed').length;
 
   return (
@@ -324,7 +346,7 @@ export default function Rewards() {
                 <p className="font-semibold text-emerald-700 flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4" /> Wallet connected
                 </p>
-                <p className="font-mono text-xs text-muted-foreground mt-0.5">{address?.slice(0,10)}...{address?.slice(-6)}</p>
+                <p className="font-mono text-xs text-muted-foreground mt-0.5">{address?.slice(0, 10)}...{address?.slice(-6)}</p>
                 <p className="text-sm mt-1 font-semibold">{ethBalance} ETH · <span className="text-primary">{Number(fdyBalance).toFixed(2)} FDY</span></p>
               </div>
             ) : (
@@ -367,9 +389,9 @@ export default function Rewards() {
           {!isAuthenticated ? (
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               {[
-                { icon: Coins,     title: 'Token Reward',    desc: 'Earn FDY tokens for every donation. 1 ETH = 100 FDY.' },
+                { icon: Coins, title: 'Token Reward', desc: 'Earn FDY tokens for every donation. 1 ETH = 100 FDY.' },
                 { icon: ImageIcon, title: 'NFT Collectible', desc: 'Large donations mint a unique NFT commemorating your support.' },
-                { icon: Gift,      title: 'Badge',           desc: 'Digital badges for reaching donation milestones.' },
+                { icon: Gift, title: 'Badge', desc: 'Digital badges for reaching donation milestones.' },
               ].map(({ icon: Icon, title, desc }) => (
                 <Card key={title} className="border-dashed">
                   <CardContent className="p-5 text-center space-y-2">
