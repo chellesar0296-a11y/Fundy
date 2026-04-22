@@ -169,9 +169,9 @@ function CancelCampaignDialog({
             >
               {isCancelling
                 ? <span className="flex items-center gap-2">
-                    <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    Cancelling...
-                  </span>
+                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  Cancelling...
+                </span>
                 : 'Confirm Cancel & Notify'}
             </Button>
           </div>
@@ -255,34 +255,55 @@ function VerificationDialog({
               <p className="text-xs text-muted-foreground italic">No documents uploaded.</p>
             )}
           </div>
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">
-              Admin Note (optional — shown to user)
-            </label>
-            <Textarea
-              placeholder="e.g. Document was unclear, please resubmit with a clearer photo."
-              rows={2} value={adminNote} onChange={(e) => setAdminNote(e.target.value)}
-            />
-          </div>
-          <div className="flex gap-3 pt-1">
-            <Button variant="outline"
-              className="flex-1 text-destructive border-destructive/30 hover:bg-destructive/10"
-              onClick={() => handle('rejected')} disabled={isProcessing}>
-              {isProcessing ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <XCircle className="w-4 h-4 mr-2" />}
-              Reject
-            </Button>
-            <Button className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
-              onClick={() => handle('approved')} disabled={isProcessing}>
-              {isProcessing ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <CheckCircle2 className="w-4 h-4 mr-2" />}
-              Approve & Verify
-            </Button>
-          </div>
+          {request.status === 'pending' && (
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">
+                Admin Note (optional — shown to user)
+              </label>
+              <Textarea
+                placeholder="e.g. Document was unclear, please resubmit with a clearer photo."
+                rows={2} value={adminNote} onChange={(e) => setAdminNote(e.target.value)}
+              />
+            </div>
+          )}
+          {request.admin_note && request.status !== 'pending' && (
+            <div className="p-3 bg-muted/40 rounded-lg">
+              <p className="text-xs text-muted-foreground mb-1">Admin Note</p>
+              <p className="text-sm">{request.admin_note}</p>
+            </div>
+          )}
+          {request.status === 'pending' ? (
+            <div className="flex gap-3 pt-1">
+              <Button variant="outline"
+                className="flex-1 text-destructive border-destructive/30 hover:bg-destructive/10"
+                onClick={() => handle('rejected')} disabled={isProcessing}>
+                {isProcessing ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <XCircle className="w-4 h-4 mr-2" />}
+                Reject
+              </Button>
+              <Button className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
+                onClick={() => handle('approved')} disabled={isProcessing}>
+                {isProcessing ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <CheckCircle2 className="w-4 h-4 mr-2" />}
+                Approve & Verify
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between pt-1">
+              <span className={`inline-flex items-center gap-1.5 text-sm font-semibold px-3 py-1.5 rounded-full ${request.status === 'approved'
+                  ? 'bg-emerald-100 text-emerald-700'
+                  : 'bg-red-100 text-red-700'
+                }`}>
+                {request.status === 'approved'
+                  ? <><CheckCircle2 className="w-4 h-4" /> Approved</>
+                  : <><XCircle className="w-4 h-4" /> Rejected</>}
+              </span>
+              <Button variant="outline" onClick={onClose}>Close</Button>
+            </div>
+          )}
         </div>
       </DialogContent>
     </Dialog>
   );
 }
-
 
 // ── Cancel Request Review Dialog ─────────────────────────────
 function CancelRequestReviewDialog({
@@ -308,7 +329,6 @@ function CancelRequestReviewDialog({
   const handle = async (action: 'approved' | 'rejected') => {
     setIsProcessing(true);
     try {
-      // If approving and campaign has an on-chain ID, cancel on-chain first
       if (action === 'approved' && campaign?.on_chain_id) {
         try {
           await cancelCampaignOnChain(Number(campaign.on_chain_id));
@@ -349,7 +369,7 @@ function CancelRequestReviewDialog({
             <Ban className="w-5 h-5 text-orange-500" /> Review Cancel Request
           </DialogTitle>
           <DialogDescription>
-            Review the organizer\'s reason and approve or reject this cancellation.
+            Review the organizer's reason and approve or reject this cancellation.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 text-sm">
@@ -367,7 +387,7 @@ function CancelRequestReviewDialog({
             ))}
           </div>
           <div className="p-3 bg-muted/40 rounded-lg">
-            <p className="text-xs text-muted-foreground mb-1">Organizer\'s Reason</p>
+            <p className="text-xs text-muted-foreground mb-1">Organizer's Reason</p>
             <p className="whitespace-pre-wrap">{request.reason}</p>
           </div>
           {campaign?.on_chain_id && (
@@ -428,6 +448,80 @@ function CancelRequestReviewDialog({
   );
 }
 
+// ── Role Toggle Confirm Dialog ────────────────────────────────
+function RoleToggleConfirmDialog({
+  user,
+  onClose,
+  onConfirmed,
+}: {
+  user: AdminUser | null;
+  onClose: () => void;
+  onConfirmed: (user: AdminUser) => Promise<void>;
+}) {
+  const [isProcessing, setIsProcessing] = useState(false);
+  if (!user) return null;
+  const newRole = user.role === 'donor' ? 'organizer' : 'donor';
+
+  const handleConfirm = async () => {
+    setIsProcessing(true);
+    try {
+      await onConfirmed(user);
+      onClose();
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  return (
+    <Dialog open={!!user} onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Users className="w-5 h-5 text-primary" /> Change User Role
+          </DialogTitle>
+          <DialogDescription>
+            You are about to change <strong>{user.name}</strong>'s role from{' '}
+            <strong className="capitalize">{user.role}</strong> →{' '}
+            <strong className="capitalize">{newRole}</strong>.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 pt-1">
+          <div className="p-3 bg-muted/40 rounded-lg text-sm text-muted-foreground space-y-1">
+            <p className="font-medium text-foreground">{user.email}</p>
+            <p>Joined {new Date(user.joined).toLocaleDateString()}</p>
+            <p>{user.donation_count} donation{user.donation_count !== 1 ? 's' : ''}</p>
+          </div>
+          {newRole === 'organizer' && (
+            <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600" />
+              <span>Organizers can create and manage fundraising campaigns on the platform.</span>
+            </div>
+          )}
+          {newRole === 'donor' && (
+            <div className="flex items-start gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-blue-600" />
+              <span>This user will lose organizer privileges and can no longer manage campaigns.</span>
+            </div>
+          )}
+          <div className="flex gap-3 pt-1">
+            <Button variant="outline" className="flex-1" onClick={onClose} disabled={isProcessing}>
+              Cancel
+            </Button>
+            <Button className="flex-1" onClick={handleConfirm} disabled={isProcessing}>
+              {isProcessing
+                ? <span className="flex items-center gap-2">
+                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  Updating…
+                </span>
+                : `Set as ${newRole}`}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ── Main ──────────────────────────────────────────────────────
 export default function AdminDashboard() {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
@@ -447,11 +541,16 @@ export default function AdminDashboard() {
   const [loadingVerifications, setLoadingVerifications] = useState(true);
   const [loadingReports, setLoadingReports] = useState(true);
   const [loadingCancelRequests, setLoadingCancelRequests] = useState(true);
-  const [selectedCancelRequest, setSelectedCancelRequest] = useState<DbCancelRequest | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const [selectedVerification, setSelectedVerification] = useState<DbVerificationRequest | null>(null);
   const [cancelTarget, setCancelTarget] = useState<AdminCampaign | null>(null);
+  const [selectedCancelRequest, setSelectedCancelRequest] = useState<DbCancelRequest | null>(null);
+
+  // User management state
+  const [roleToggleTarget, setRoleToggleTarget] = useState<AdminUser | null>(null);
+  const [userSearch, setUserSearch] = useState('');
+  const [userRoleFilter, setUserRoleFilter] = useState<'all' | 'donor' | 'organizer' | 'admin'>('all');
 
   const stats = {
     totalCampaigns: campaigns.length,
@@ -603,12 +702,18 @@ export default function AdminDashboard() {
     toast.success('Reward minted.');
   };
 
-  const handleToggleUserRole = async (u: AdminUser) => {
+  // Opens confirmation dialog
+  const handleToggleUserRole = (u: AdminUser) => {
+    setRoleToggleTarget(u);
+  };
+
+  // Actual role change — called after dialog confirmation
+  const confirmToggleUserRole = async (u: AdminUser) => {
     const newRole = u.role === 'donor' ? 'organizer' : 'donor';
     const { error } = await supabase.from('profiles').update({ role: newRole }).eq('id', u.id);
-    if (error) { toast.error(error.message); return; }
+    if (error) { toast.error(error.message); throw error; }
     setUsers(prev => prev.map(x => x.id === u.id ? { ...x, role: newRole } : x));
-    toast.success(`Role updated to ${newRole}.`);
+    toast.success(`${u.name} is now a${newRole === 'organizer' ? 'n' : ''} ${newRole}.`);
   };
 
   const handleReportAction = async (
@@ -620,7 +725,6 @@ export default function AdminDashboard() {
       await updateReportStatus(reportId, action);
       setReports(prev => prev.map(r => r.id === reportId ? { ...r, status: action } : r));
       if (action === 'reviewed' && campaignId) {
-        // Open cancel dialog for the reported campaign
         setCancelTarget(campaigns.find(x => x.id === campaignId) ?? null);
       }
       if (action === 'dismissed') toast.success('Report dismissed.');
@@ -654,6 +758,22 @@ export default function AdminDashboard() {
     cancelled: 'bg-red-100 text-red-600',
   };
 
+  // ── Filtered users ─────────────────────────────────────────
+  const filteredUsers = users.filter(u => {
+    const matchesSearch = !userSearch ||
+      u.name.toLowerCase().includes(userSearch.toLowerCase()) ||
+      u.email.toLowerCase().includes(userSearch.toLowerCase());
+    const matchesRole = userRoleFilter === 'all' || u.role === userRoleFilter;
+    return matchesSearch && matchesRole;
+  });
+
+  const roleCounts = {
+    all: users.length,
+    donor: users.filter(u => u.role === 'donor').length,
+    organizer: users.filter(u => u.role === 'organizer').length,
+    admin: users.filter(u => u.role === 'admin').length,
+  };
+
   return (
     <div className="max-w-7xl mx-auto px-4 py-10">
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
@@ -673,28 +793,28 @@ export default function AdminDashboard() {
 
         {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
-          <StatCard title="Total campaigns"        value={stats.totalCampaigns}       icon={LayoutDashboard} loading={loadingCampaigns} />
-          <StatCard title="Active"                 value={stats.activeCampaigns}      icon={TrendingUp}      loading={loadingCampaigns} color="text-emerald-600" />
-          <StatCard title="Users"                  value={stats.totalUsers}           icon={Users}           loading={loadingUsers} />
-          <StatCard title="Pending rewards"        value={stats.pendingRewards}       icon={Gift}            loading={loadingRewards} color="text-amber-600" />
-          <StatCard title="Pending verifications"  value={stats.pendingVerifications} icon={ShieldCheck}     loading={loadingVerifications} color="text-blue-600" />
-          <StatCard title="Pending reports"        value={stats.pendingReports}       icon={Flag}            loading={loadingReports} color="text-red-500" />
-          <StatCard title="Cancel requests"        value={stats.pendingCancelRequests} icon={Ban}             loading={loadingCancelRequests} color="text-orange-500" />
+          <StatCard title="Total campaigns" value={stats.totalCampaigns} icon={LayoutDashboard} loading={loadingCampaigns} />
+          <StatCard title="Active" value={stats.activeCampaigns} icon={TrendingUp} loading={loadingCampaigns} color="text-emerald-600" />
+          <StatCard title="Users" value={stats.totalUsers} icon={Users} loading={loadingUsers} />
+          <StatCard title="Pending rewards" value={stats.pendingRewards} icon={Gift} loading={loadingRewards} color="text-amber-600" />
+          <StatCard title="Pending verifications" value={stats.pendingVerifications} icon={ShieldCheck} loading={loadingVerifications} color="text-blue-600" />
+          <StatCard title="Pending reports" value={stats.pendingReports} icon={Flag} loading={loadingReports} color="text-red-500" />
+          <StatCard title="Cancel requests" value={stats.pendingCancelRequests} icon={Ban} loading={loadingCancelRequests} color="text-orange-500" />
         </div>
 
         {/* Tabs */}
         <Tabs defaultValue="campaigns">
           <TabsList className="mb-6 flex-wrap h-auto gap-1">
-            <TabsTrigger value="campaigns"     className="gap-2">
+            <TabsTrigger value="campaigns" className="gap-2">
               <LayoutDashboard className="w-4 h-4" /> Campaigns
             </TabsTrigger>
-            <TabsTrigger value="users"         className="gap-2">
+            <TabsTrigger value="users" className="gap-2">
               <Users className="w-4 h-4" /> Users
             </TabsTrigger>
-            <TabsTrigger value="rewards"       className="gap-2">
+            <TabsTrigger value="rewards" className="gap-2">
               <Gift className="w-4 h-4" /> Rewards
             </TabsTrigger>
-            <TabsTrigger value="reports"       className="gap-2 relative">
+            <TabsTrigger value="reports" className="gap-2 relative">
               <Flag className="w-4 h-4" /> Reports
               {stats.pendingReports > 0 && (
                 <span className="ml-1 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
@@ -812,67 +932,154 @@ export default function AdminDashboard() {
           <TabsContent value="users">
             <Card>
               <CardHeader>
-                <CardTitle>User Management</CardTitle>
-                <CardDescription>All registered users, roles, verification status, and activity.</CardDescription>
+                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+                  <div>
+                    <CardTitle>User Management</CardTitle>
+                    <CardDescription className="mt-1">
+                      Manage roles and view activity for all registered users.
+                    </CardDescription>
+                  </div>
+                  {/* Search */}
+                  <div className="relative w-full sm:w-64 shrink-0">
+                    <input
+                      type="text"
+                      placeholder="Search name or email…"
+                      value={userSearch}
+                      onChange={(e) => setUserSearch(e.target.value)}
+                      className="w-full pl-8 pr-3 py-1.5 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 placeholder:text-muted-foreground"
+                    />
+                    <svg
+                      className="absolute left-2.5 top-2 w-3.5 h-3.5 text-muted-foreground pointer-events-none"
+                      fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                    >
+                      <circle cx="11" cy="11" r="8" strokeWidth="2" />
+                      <path d="m21 21-4.35-4.35" strokeWidth="2" strokeLinecap="round" />
+                    </svg>
+                  </div>
+                </div>
+                {/* Role filter pills */}
+                <div className="flex flex-wrap gap-2 mt-3">
+                  {(['all', 'donor', 'organizer', 'admin'] as const).map((role) => (
+                    <button
+                      key={role}
+                      onClick={() => setUserRoleFilter(role)}
+                      className={`text-xs px-3 py-1 rounded-full border font-medium transition-colors capitalize ${userRoleFilter === role
+                          ? 'bg-primary text-primary-foreground border-primary'
+                          : 'bg-background text-muted-foreground border-border hover:bg-muted/50'
+                        }`}
+                    >
+                      {role === 'all' ? 'All' : role} <span className="opacity-60">({roleCounts[role]})</span>
+                    </button>
+                  ))}
+                </div>
               </CardHeader>
               <CardContent className="overflow-x-auto p-0">
                 {loadingUsers
                   ? <div className="flex justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>
-                  : users.length === 0
-                    ? <p className="text-center text-muted-foreground py-16">No users found.</p>
+                  : filteredUsers.length === 0
+                    ? (
+                      <div className="text-center py-16 text-muted-foreground">
+                        <Users className="w-12 h-12 mx-auto mb-4 opacity-20" />
+                        <p className="font-medium">
+                          {userSearch || userRoleFilter !== 'all' ? 'No users match your filters.' : 'No users found.'}
+                        </p>
+                        {(userSearch || userRoleFilter !== 'all') && (
+                          <button
+                            className="text-xs text-primary mt-2 hover:underline"
+                            onClick={() => { setUserSearch(''); setUserRoleFilter('all'); }}
+                          >
+                            Clear filters
+                          </button>
+                        )}
+                      </div>
+                    )
                     : (
                       <table className="w-full text-sm">
                         <thead className="border-b bg-muted/30 text-muted-foreground">
                           <tr>
                             <th className="px-4 py-3 text-left font-medium">User</th>
                             <th className="px-4 py-3 text-left font-medium">Role</th>
-                            <th className="px-4 py-3 text-left font-medium">Verified</th>
+                            <th className="px-4 py-3 text-left font-medium">Verification</th>
                             <th className="px-4 py-3 text-center font-medium">Donations</th>
                             <th className="px-4 py-3 text-left font-medium">Joined</th>
                             <th className="px-4 py-3 text-left font-medium">Change Role</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {users.map((u) => (
-                            <tr key={u.id} className="border-b hover:bg-muted/30 transition-colors">
-                              <td className="px-4 py-3">
-                                <p className="font-medium">{u.name}</p>
-                                <p className="text-xs text-muted-foreground">{u.email}</p>
-                              </td>
-                              <td className="px-4 py-3">
-                                <Badge
-                                  variant={u.role === 'admin' ? 'default' : u.role === 'organizer' ? 'secondary' : 'outline'}
-                                  className="text-xs"
-                                >
-                                  {u.role}
-                                </Badge>
-                              </td>
-                              <td className="px-4 py-3">
-                                {u.is_verified
-                                  ? <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
+                          {filteredUsers.map((u) => {
+                            const initials = u.name
+                              ? u.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()
+                              : '?';
+                            const newRole = u.role === 'donor' ? 'organizer' : 'donor';
+                            return (
+                              <tr key={u.id} className="border-b hover:bg-muted/30 transition-colors">
+                                {/* User cell */}
+                                <td className="px-4 py-3">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-8 h-8 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center shrink-0 select-none">
+                                      {initials}
+                                    </div>
+                                    <div className="min-w-0">
+                                      <p className="font-medium leading-none truncate">{u.name}</p>
+                                      <p className="text-xs text-muted-foreground mt-0.5 truncate">{u.email}</p>
+                                    </div>
+                                  </div>
+                                </td>
+                                {/* Role */}
+                                <td className="px-4 py-3">
+                                  <Badge
+                                    variant={u.role === 'admin' ? 'default' : u.role === 'organizer' ? 'secondary' : 'outline'}
+                                    className="text-xs capitalize"
+                                  >
+                                    {u.role}
+                                  </Badge>
+                                </td>
+                                {/* Verification */}
+                                <td className="px-4 py-3">
+                                  {u.is_verified ? (
+                                    <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
                                       <CheckCircle className="w-3 h-3" /> Verified
                                     </span>
-                                  : u.verification_status === 'pending'
-                                    ? <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
-                                        <Clock className="w-3 h-3" /> Pending
-                                      </span>
-                                    : <span className="text-xs text-muted-foreground">—</span>}
-                              </td>
-                              <td className="px-4 py-3 text-center">{u.donation_count}</td>
-                              <td className="px-4 py-3 text-xs text-muted-foreground">
-                                {new Date(u.joined).toLocaleDateString()}
-                              </td>
-                              <td className="px-4 py-3">
-                                {u.role !== 'admin' && (
-                                  <Button size="sm" variant="ghost"
-                                    className="text-xs text-muted-foreground hover:text-foreground"
-                                    onClick={() => handleToggleUserRole(u)}>
-                                    → {u.role === 'donor' ? 'organizer' : 'donor'}
-                                  </Button>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
+                                  ) : u.verification_status === 'pending' ? (
+                                    <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
+                                      <Clock className="w-3 h-3" /> Pending
+                                    </span>
+                                  ) : (
+                                    <span className="text-xs text-muted-foreground">—</span>
+                                  )}
+                                </td>
+                                {/* Donations */}
+                                <td className="px-4 py-3 text-center">
+                                  {u.donation_count > 0 ? (
+                                    <span className="inline-flex items-center justify-center text-xs font-semibold bg-primary/10 text-primary px-2 py-0.5 rounded-full min-w-[24px]">
+                                      {u.donation_count}
+                                    </span>
+                                  ) : (
+                                    <span className="text-xs text-muted-foreground">0</span>
+                                  )}
+                                </td>
+                                {/* Joined */}
+                                <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
+                                  {new Date(u.joined).toLocaleDateString()}
+                                </td>
+                                {/* Change role */}
+                                <td className="px-4 py-3">
+                                  {u.role !== 'admin' ? (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="text-xs h-7 px-2.5 gap-1.5"
+                                      onClick={() => handleToggleUserRole(u)}
+                                    >
+                                      → <span className="capitalize">{newRole}</span>
+                                    </Button>
+                                  ) : (
+                                    <span className="text-xs text-muted-foreground italic">Admin</span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     )}
@@ -913,23 +1120,22 @@ export default function AdminDashboard() {
                                 {r.token_amount && <span className="ml-1 text-xs text-primary">+{r.token_amount}</span>}
                               </td>
                               <td className="px-4 py-3">
-                                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                                  r.status === 'pending' ? 'bg-amber-100 text-amber-700'
+                                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${r.status === 'pending' ? 'bg-amber-100 text-amber-700'
                                     : r.status === 'minted' ? 'bg-emerald-100 text-emerald-700'
-                                    : r.status === 'claimed' ? 'bg-blue-100 text-blue-700'
-                                    : 'bg-red-100 text-red-700'
-                                }`}>
+                                      : r.status === 'claimed' ? 'bg-blue-100 text-blue-700'
+                                        : 'bg-red-100 text-red-700'
+                                  }`}>
                                   {r.status}
                                 </span>
                               </td>
                               <td className="px-4 py-3">
                                 {r.status === 'pending'
                                   ? <Button size="sm" variant="outline" className="gap-1 text-xs" onClick={() => handleMintReward(r.id)}>
-                                      <Gift className="w-3 h-3" /> Trigger mint
-                                    </Button>
+                                    <Gift className="w-3 h-3" /> Trigger mint
+                                  </Button>
                                   : <span className="text-xs text-muted-foreground flex items-center gap-1">
-                                      <CheckCircle2 className="w-3 h-3 text-emerald-500" /> {r.status}
-                                    </span>}
+                                    <CheckCircle2 className="w-3 h-3 text-emerald-500" /> {r.status}
+                                  </span>}
                               </td>
                             </tr>
                           ))}
@@ -994,11 +1200,10 @@ export default function AdminDashboard() {
                                   {new Date(r.created_at).toLocaleDateString()}
                                 </td>
                                 <td className="px-4 py-3">
-                                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                                    r.status === 'pending' ? 'bg-amber-100 text-amber-700'
+                                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${r.status === 'pending' ? 'bg-amber-100 text-amber-700'
                                       : r.status === 'dismissed' ? 'bg-slate-100 text-slate-500'
-                                      : 'bg-blue-100 text-blue-700'
-                                  }`}>
+                                        : 'bg-blue-100 text-blue-700'
+                                    }`}>
                                     {r.status}
                                   </span>
                                 </td>
@@ -1155,23 +1360,20 @@ export default function AdminDashboard() {
                                   {new Date(cr.created_at).toLocaleDateString()}
                                 </td>
                                 <td className="px-4 py-3">
-                                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                                    cr.status === 'pending'  ? 'bg-amber-100 text-amber-700'
-                                    : cr.status === 'approved' ? 'bg-red-100 text-red-700'
-                                    : 'bg-slate-100 text-slate-500'
-                                  }`}>
+                                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${cr.status === 'pending' ? 'bg-amber-100 text-amber-700'
+                                      : cr.status === 'approved' ? 'bg-red-100 text-red-700'
+                                        : 'bg-slate-100 text-slate-500'
+                                    }`}>
                                     {cr.status}
                                   </span>
                                 </td>
                                 <td className="px-4 py-3">
                                   {cr.status === 'pending' && (
-                                    <div className="flex gap-1">
-                                      <Button size="sm" variant="ghost"
-                                        className="text-xs text-muted-foreground hover:text-foreground"
-                                        onClick={() => setSelectedCancelRequest(cr)}>
-                                        <Eye className="w-3 h-3 mr-1" /> Review
-                                      </Button>
-                                    </div>
+                                    <Button size="sm" variant="ghost"
+                                      className="text-xs text-muted-foreground hover:text-foreground"
+                                      onClick={() => setSelectedCancelRequest(cr)}>
+                                      <Eye className="w-3 h-3 mr-1" /> Review
+                                    </Button>
                                   )}
                                   {cr.status !== 'pending' && (
                                     <Button size="sm" variant="ghost" className="text-xs text-muted-foreground"
@@ -1215,6 +1417,11 @@ export default function AdminDashboard() {
             if (req) setCampaigns(prev => prev.map(c => c.id === req.campaign_id ? { ...c, status: 'cancelled' } : c));
           }
         }}
+      />
+      <RoleToggleConfirmDialog
+        user={roleToggleTarget}
+        onClose={() => setRoleToggleTarget(null)}
+        onConfirmed={confirmToggleUserRole}
       />
     </div>
   );
