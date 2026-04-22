@@ -97,7 +97,7 @@ export const useAuth = () => {
     }
   }, []);
 
-  const register = useCallback(async (name: string, email: string, password: string) => {
+  const register = useCallback(async (name: string, email: string, password: string, walletAddress?: string) => {
     setIsLoading(true);
     setError(null);
     try {
@@ -106,10 +106,21 @@ export const useAuth = () => {
         password,
         options: {
           data: { name },
-          emailRedirectTo: `${window.location.origin}/auth/callback`, 
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
         },
       });
       if (error) throw error;
+
+      // Save wallet address immediately after signup
+      if (data.user && walletAddress) {
+        await supabase
+          .from('profiles')
+          .upsert({
+            id: data.user.id,
+            wallet_address: walletAddress,
+          }, { onConflict: 'id' });
+      }
+
       return data.user;
     } catch (err: any) {
       const msg = err.message ?? 'Registration failed';

@@ -85,7 +85,8 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login' }: AuthModalPr
         return;
       }
 
-      await register(values.name, values.email, values.password);
+      
+      await register(values.name, values.email, values.password, address);
       toast.success('Account created! Please check your email to confirm.');
       onClose();
     } catch (error: any) {
@@ -151,7 +152,6 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login' }: AuthModalPr
                   <button
                     onClick={() => {
                       setTab('register');
-                      if (isConnected) disconnectWallet();
                     }}
                     className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all ${tab === 'register' ? 'bg-card shadow text-foreground' : 'text-muted-foreground'
                       }`}
