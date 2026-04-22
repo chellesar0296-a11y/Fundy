@@ -303,9 +303,6 @@ export default function Dashboard() {
               <TabsTrigger value="history" className="rounded-lg gap-2">
                 <History className="w-4 h-4" /> Donation History
               </TabsTrigger>
-              <TabsTrigger value="impact" className="rounded-lg gap-2">
-                <TrendingUp className="w-4 h-4" /> Impact Map
-              </TabsTrigger>
               <TabsTrigger value="settings" className="rounded-lg gap-2">
                 <Settings className="w-4 h-4" /> Settings
               </TabsTrigger>
