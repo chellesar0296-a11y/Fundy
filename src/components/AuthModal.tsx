@@ -45,7 +45,7 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login' }: AuthModalPr
     defaultValues: { name: '', email: '', password: '' },
   });
 
-  const { connect: connectWallet, isConnected, address } = useWeb3();
+  const { connect: connectWallet, disconnect: disconnectWallet, isConnected, address } = useWeb3();
 
   async function onLogin(values: z.infer<typeof loginSchema>) {
     try {
@@ -143,17 +143,18 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login' }: AuthModalPr
                 <div className="flex bg-muted rounded-xl p-1 mb-6">
                   <button
                     onClick={() => setTab('login')}
-                    className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all ${
-                      tab === 'login' ? 'bg-card shadow text-foreground' : 'text-muted-foreground'
-                    }`}
+                    className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all ${tab === 'login' ? 'bg-card shadow text-foreground' : 'text-muted-foreground'
+                      }`}
                   >
                     {t('nav_login')}
                   </button>
                   <button
-                    onClick={() => setTab('register')}
-                    className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all ${
-                      tab === 'register' ? 'bg-card shadow text-foreground' : 'text-muted-foreground'
-                    }`}
+                    onClick={() => {
+                      setTab('register');
+                      if (isConnected) disconnectWallet();
+                    }}
+                    className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all ${tab === 'register' ? 'bg-card shadow text-foreground' : 'text-muted-foreground'
+                      }`}
                   >
                     {t('nav_register')}
                   </button>
@@ -290,7 +291,7 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login' }: AuthModalPr
                                 <span className="text-base">✅</span>
                                 <div>
                                   <p className="font-semibold text-xs">Wallet connected</p>
-                                  <p className="font-mono text-xs">{address?.slice(0,10)}...{address?.slice(-6)}</p>
+                                  <p className="font-mono text-xs">{address?.slice(0, 10)}...{address?.slice(-6)}</p>
                                 </div>
                               </div>
                             ) : (
