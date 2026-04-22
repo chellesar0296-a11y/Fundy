@@ -141,34 +141,37 @@ export default function Dashboard() {
       try {
         const contract = new ethers.Contract(CONTRACT_ADDRESSES.crowdfunding, CROWDFUNDING_ABI, provider);
 
-        // My donations (as donor)
-        const donorFilter = contract.filters.DonationReceived(null, address);
-        const donorEvents = await contract.queryFilter(donorFilter, 0, 'latest');
+// My donations (as donor)
+        const donorFilter = contract.filters.DonationReceived();
+        const allEvents = await contract.queryFilter(donorFilter, 0, "latest");
+        const myEvents = allEvents.filter((e: any) =>
+          e.args.donor.toLowerCase() === address.toLowerCase()
+        );
 
-        const txs = await Promise.all(donorEvents.map(async (e: any) => {
+        const txs = await Promise.all(myEvents.map(async (e: any) => {
           try {
             const block = await provider.getBlock(e.blockNumber);
             return {
               type: 'donated',
               txHash: e.transactionHash,
               campaignId: Number(e.args.campaignId),
-              amount: ethers.formatEther(e.args.amount),
-              amountRm: (Number(ethers.formatEther(e.args.amount)) / 0.001).toFixed(2),
-              tokens: ethers.formatEther(e.args.tokensAwarded),
+              amount: ethers.formatEther(e.args.ethAmount),
+              tokens: ethers.formatEther(e.args.fdyMinted),
               timestamp: block ? new Date(Number(block.timestamp) * 1000) : null,
             };
           } catch {
             return {
-              type: 'donated',
-              txHash: e.transactionHash,
+              type:       'donated',
+              txHash:     e.transactionHash,
               campaignId: Number(e.args.campaignId),
-              amount: ethers.formatEther(e.args.amount),
-              amountRm: (Number(ethers.formatEther(e.args.amount)) / 0.001).toFixed(2),
-              tokens: '0',
-              timestamp: null,
+              amount: ethers.formatEther(e.args.ethAmount),
+              amountRm:   (Number(ethers.formatEther(e.args.amount)) / 0.001).toFixed(2),
+              tokens:     '0',
+              timestamp:  null,
             };
           }
         }));
+        setOnChainTxs(txs.reverse());
 
         if (!cancelled) {
           setOnChainTxs(txs.reverse());
@@ -617,7 +620,7 @@ export default function Dashboard() {
                         <tr>
                           <th className="px-5 py-3 text-left font-medium">Date</th>
                           <th className="px-5 py-3 text-left font-medium">Campaign #</th>
-                          <th className="px-5 py-3 text-left font-medium">Amount</th>
+                          <th className="px-5 py-3 text-left font-medium">Amount (ETH)</th>
                           <th className="px-5 py-3 text-left font-medium">FDY Earned</th>
                           <th className="px-5 py-3 text-left font-medium">Tx Hash</th>
                         </tr>
@@ -630,8 +633,8 @@ export default function Dashboard() {
                             </td>
                             <td className="px-5 py-3 font-medium">Campaign #{tx.campaignId}</td>
                             <td className="px-5 py-3">
-                              <span className="font-semibold">RM{tx.amountRm}</span>
-                              <span className="text-xs text-muted-foreground ml-1">({Number(tx.amount).toFixed(5)} ETH)</span>
+                              <span className="font-semibold">{tx.amountRm}</span>
+                              <span className="text-xs text-muted-foreground ml-1">{Number(tx.amount).toFixed(5)} ETH</span>
                             </td>
                             <td className="px-5 py-3">
                               <span className="text-primary font-semibold">+{Number(tx.tokens).toFixed(2)} FDY</span>
