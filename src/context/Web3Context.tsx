@@ -122,7 +122,6 @@ export function Web3Provider({
 
   // ── Auto-reconnect to bound wallet (no popup) ───────────────
   useEffect(() => {
-    // New/fresh user with no bound wallet — clear any stale connecting state
     if (!boundWalletAddress) {
       setIsConnecting(false);
       setError(null);
@@ -131,15 +130,20 @@ export function Web3Provider({
     if (!window.ethereum || isConnected) return;
     (async () => {
       try {
+        setIsConnecting(true);
         const prov = new ethers.BrowserProvider(window.ethereum);
         const accounts: string[] = await prov.send('eth_accounts', []);
         const match = accounts.find(a => a.toLowerCase() === boundWalletAddress.toLowerCase());
-        if (!match) return;
-        const sgn = await prov.getSigner(match);
-        const network = await prov.getNetwork();
-        const bal = await getBalances(prov, match);
-        setConnected(prov, sgn, match, Number(network.chainId), bal);
-      } catch { }
+        if (match) {
+          const sgn = await prov.getSigner(match);
+          const network = await prov.getNetwork();
+          const bal = await getBalances(prov, match);
+          setConnected(prov, sgn, match, Number(network.chainId), bal);
+        }
+      } catch {
+      } finally {
+        setIsConnecting(false); // ← always clears, no more eternal spinner
+      }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boundWalletAddress, isConnected]);
@@ -153,8 +157,13 @@ export function Web3Provider({
       const prov = new ethers.BrowserProvider(window.ethereum);
 
       if (boundWalletAddress) {
-        // Account already bound — just connect to it
-        await prov.send('eth_requestAccounts', []);
+        // Force account picker popup (same as unbound flow)
+        try {
+          await prov.send('wallet_requestPermissions', [{ eth_accounts: {} }]);
+        } catch (e: any) {
+          if (e?.code === 4001) { setError('Connection cancelled.'); return; }
+          await prov.send('eth_requestAccounts', []);
+        }
         const sgn = await prov.getSigner();
         const addr = await sgn.getAddress();
 

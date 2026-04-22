@@ -98,23 +98,23 @@ export const useAuth = () => {
   }, []);
 
   const register = useCallback(async (name: string, email: string, password: string, walletAddress?: string) => {
-  setIsLoading(true);
-  setError(null);
-  try {
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: { 
-          name,
-          wallet_address: walletAddress ?? null,
+    setIsLoading(true);
+    setError(null);
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            name,
+            wallet_address: walletAddress ?? null,
+          },
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
         },
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
-      },
-    });
-    if (error) throw error;
+      });
+      if (error) throw error;
 
-    return data.user;
+      // ← REMOVED the early return here
 
       // Save wallet address immediately after signup
       if (data.user && walletAddress) {
@@ -131,7 +131,6 @@ export const useAuth = () => {
           if (!upsertErr) { saved = true; break; }
         }
         if (!saved) {
-          // Last resort: upsert with required fields if trigger never ran
           await supabase
             .from('profiles')
             .upsert({
@@ -144,7 +143,7 @@ export const useAuth = () => {
         }
       }
 
-      return data.user;
+      return data.user; // ← single return at the end
     } catch (err: any) {
       const msg = err.message ?? 'Registration failed';
       setError(msg);
@@ -153,7 +152,6 @@ export const useAuth = () => {
       setIsLoading(false);
     }
   }, []);
-
   const logout = useCallback(async () => {
     await supabase.auth.signOut();
     setUser(null);

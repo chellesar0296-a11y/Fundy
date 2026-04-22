@@ -229,11 +229,32 @@ function RewardCard({ reward, onClaim, isLoggedIn, userName }: {
 export default function Rewards() {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const { rewards, creditScore, isLoading, claimReward } = useRewards(user?.id);
-  const { isConnected, isConnecting, address, fdyBalance, ethBalance, connect, provider } = useWeb3();
+  const { isConnected, address, fdyBalance, ethBalance, connect, provider } = useWeb3();
   const navigate = useNavigate();
 
-  // Fetch on-chain NFTs owned by connected wallet
+  // ── ALL hooks must be before any early returns ──
+  const [walletWait, setWalletWait] = useState(true);
   const [onChainNfts, setOnChainNfts] = useState<any[]>([]);
+
+  // Auto-connect + 5s timeout
+  useEffect(() => {
+  if (!isAuthenticated) return; // don't attempt if not logged in
+
+  const t = setTimeout(() => {
+    if (!isConnected && window.ethereum) {
+      connect().catch(() => {}); // popup only if extension exists + still not connected
+    }
+    setWalletWait(false);
+  }, 3000);
+  return () => clearTimeout(t);
+}, [isAuthenticated]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Dismiss spinner immediately when wallet connects
+  useEffect(() => {
+    if (isConnected) setWalletWait(false);
+  }, [isConnected]);
+
+  // Fetch on-chain NFTs
   useEffect(() => {
     if (!isConnected || !address || !provider) return;
     if (CONTRACT_ADDRESSES.nft === '0x0000000000000000000000000000000000000000') return;
@@ -252,11 +273,12 @@ export default function Rewards() {
     }).catch(() => { });
   }, [isConnected, address, provider]);
 
+  // ── Early returns AFTER all hooks ──
   if (authLoading) {
     return <div className="min-h-[60vh] flex items-center justify-center"><Loader2 className="w-10 h-10 animate-spin text-primary" /></div>;
   }
-  // Early return AFTER all hooks — auth gate
-  if (!isAuthenticated && !authLoading) {
+
+  if (!isAuthenticated) {
     return (
       <div className="min-h-[80vh] flex flex-col items-center justify-center p-6 text-center">
         <div className="bg-accent/20 p-6 rounded-full mb-6">
@@ -267,33 +289,29 @@ export default function Rewards() {
           Please log in to view your rewards and claim your FDY tokens.
         </p>
         <div className="flex gap-4">
-          <Button onClick={() => navigate(ROUTE_PATHS.LOGIN)} size="lg">
-            Log In
-          </Button>
-          <Button onClick={() => navigate(ROUTE_PATHS.HOME)} variant="outline" size="lg">
-            Back to Home
-          </Button>
+          <Button onClick={() => navigate(ROUTE_PATHS.LOGIN)} size="lg">Log In</Button>
+          <Button onClick={() => navigate(ROUTE_PATHS.HOME)} variant="outline" size="lg">Back to Home</Button>
         </div>
       </div>
     );
   }
 
-  if (isAuthenticated && !isConnected) {
-  return (
-    <div className="max-w-4xl mx-auto px-4 py-10">
-      <div className="text-center py-20 space-y-4">
-        <Loader2 className="w-10 h-10 animate-spin text-primary mx-auto" />
-        <p className="text-muted-foreground">Reconnecting wallet...</p>
-        <p className="text-xs text-muted-foreground mt-2">
-          Taking too long?{' '}
-          <button onClick={connect} className="text-primary hover:underline">
-            Connect manually
-          </button>
-        </p>
+  if (!isConnected && walletWait) {
+    return (
+      <div className="max-w-4xl mx-auto px-4 py-10">
+        <div className="text-center py-20 space-y-4">
+          <Loader2 className="w-10 h-10 animate-spin text-primary mx-auto" />
+          <p className="text-muted-foreground">Reconnecting wallet...</p>
+          <p className="text-xs text-muted-foreground mt-2">
+            Taking too long?{' '}
+            <button onClick={connect} className="text-primary hover:underline">
+              Connect manually
+            </button>
+          </p>
+        </div>
       </div>
-    </div>
-  );
-}
+    );
+  }
 
   const pendingCount = rewards.filter(r => r.status === 'pending').length;
   const mintedCount = rewards.filter(r => r.status === 'minted').length;
