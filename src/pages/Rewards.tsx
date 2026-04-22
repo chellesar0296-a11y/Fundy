@@ -229,7 +229,7 @@ function RewardCard({ reward, onClaim, isLoggedIn, userName }: {
 export default function Rewards() {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const { rewards, creditScore, isLoading, claimReward } = useRewards(user?.id);
-  const { isConnected, address, fdyBalance, ethBalance, connect, provider } = useWeb3();
+  const { isConnected, isConnecting, address, fdyBalance, ethBalance, connect, provider } = useWeb3();
   const navigate = useNavigate();
 
   // Fetch on-chain NFTs owned by connected wallet
@@ -251,6 +251,12 @@ export default function Rewards() {
       setOnChainNfts(nfts);
     }).catch(() => { });
   }, [isConnected, address, provider]);
+  useEffect(() => {
+    if (authLoading) return;
+    if (!isAuthenticated) return;
+    if (isConnected || isConnecting) return;
+    connect();
+  }, [authLoading, isAuthenticated, isConnected, isConnecting]);
 
   if (authLoading) {
     return <div className="min-h-[60vh] flex items-center justify-center"><Loader2 className="w-10 h-10 animate-spin text-primary" /></div>;
@@ -279,26 +285,18 @@ export default function Rewards() {
   }
 
   // Must be connected to see rewards
-  if (!isConnected) {
+  if (isAuthenticated && !isConnected) {
     return (
       <div className="max-w-4xl mx-auto px-4 py-10">
-        <div className="text-center py-20 space-y-6">
-          <div className="inline-flex p-6 bg-primary/10 rounded-full">
-            <span className="text-5xl">🦊</span>
-          </div>
-          <h2 className="text-2xl font-bold">Connect your wallet to view rewards</h2>
-          <p className="text-muted-foreground max-w-md mx-auto">
-            Your FDY tokens and NFT rewards are stored on-chain and linked to your MetaMask wallet.
-            Connect to see what you've earned.
+        <div className="text-center py-20 space-y-4">
+          <Loader2 className="w-10 h-10 animate-spin text-primary mx-auto" />
+          <p className="text-muted-foreground">Reconnecting your wallet...</p>
+          <p className="text-xs text-muted-foreground">
+            Taking too long?{' '}
+            <button onClick={connect} className="text-primary hover:underline">
+              Click here to connect manually
+            </button>
           </p>
-          <Button size="lg" onClick={connect} className="gap-2">
-            🦊 Connect MetaMask
-          </Button>
-          {!isAuthenticated && (
-            <p className="text-sm text-muted-foreground">
-              <button onClick={() => navigate(ROUTE_PATHS.LOGIN)} className="text-primary hover:underline">Log in</button> to also see your credit score and claim history.
-            </p>
-          )}
         </div>
       </div>
     );

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { AuthModal } from '@/components/AuthModal';
 
+import { useWeb3 } from '@/context/Web3Context';
 interface LayoutProps {
   children: React.ReactNode;
 }
@@ -27,7 +28,12 @@ export function Layout({ children }: LayoutProps) {
   });
   const { t, setLanguage, currentLanguage, languages } = useLanguage();
   const { user, isAuthenticated, logout } = useAuth();
+  const { disconnect } = useWeb3();
   const location = useLocation();
+  const handleLogout = useCallback(() => {
+  disconnect();
+  logout();
+}, [disconnect, logout]);
 
   useEffect(() => {
     const handleScroll = () => setIsScrolled(window.scrollY > 20);
@@ -172,7 +178,7 @@ export function Layout({ children }: LayoutProps) {
                       </Link>
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={logout} className="cursor-pointer text-destructive focus:text-destructive">
+                    <DropdownMenuItem onClick={handleLogout} className="cursor-pointer text-destructive focus:text-destructive">
                       <LogOut className="mr-2 h-4 w-4" />
                       <span>Logout</span>
                     </DropdownMenuItem>
@@ -257,7 +263,7 @@ export function Layout({ children }: LayoutProps) {
                       <p className="text-xs text-muted-foreground">{user?.email}</p>
                     </div>
                   </div>
-                  <Button variant="outline" className="w-full justify-start h-12 text-destructive" onClick={logout}>
+                  <Button variant="outline" className="w-full justify-start h-12 text-destructive" onClick={handleLogout}>
                     <LogOut className="mr-2 h-5 w-5" /> Logout
                   </Button>
                 </div>

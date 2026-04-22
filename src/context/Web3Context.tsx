@@ -133,7 +133,7 @@ export function Web3Provider({
       } catch {}
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [boundWalletAddress]);
+    }, [boundWalletAddress, isConnected]);
 
   // ── Connect ────────────────────────────────────────────────
   const connect = useCallback(async () => {
