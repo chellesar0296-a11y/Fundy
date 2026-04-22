@@ -236,12 +236,6 @@ export default function Dashboard() {
               </div>
             </div>
           </div>
-          <div className="flex gap-4">
-            <Button className="shadow-lg shadow-primary/25" onClick={() => navigate(ROUTE_PATHS.CAMPAIGNS)}>
-              <Plus className="w-4 h-4 mr-2" />
-              Explore Causes
-            </Button>
-          </div>
         </header>
 
         {/* Verification Banner */}
