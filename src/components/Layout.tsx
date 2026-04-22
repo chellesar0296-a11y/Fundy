@@ -26,6 +26,7 @@ export function Layout({ children }: LayoutProps) {
   const [authModal, setAuthModal] = useState<{ open: boolean; tab: 'login' | 'register' }>({
     open: false, tab: 'login',
   });
+  
   const { t, setLanguage, currentLanguage, languages } = useLanguage();
   const { user, isAuthenticated, logout } = useAuth();
   const { disconnect } = useWeb3();
