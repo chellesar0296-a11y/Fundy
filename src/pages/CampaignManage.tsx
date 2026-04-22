@@ -16,7 +16,7 @@ import {
 } from '@/components/ui/dialog';
 import {
   ArrowLeft, Loader2, Gift, MessageCircle, TrendingUp,
-  Send, ImagePlus, Trash2, Edit, Save, Info, Clock, XCircle, CheckCircle2,
+  Send, ImagePlus, Trash2, Edit, Save, Info, Clock, XCircle, CheckCircle2, Ban,
 } from 'lucide-react';
 import {
   createCampaignUpdate,
@@ -133,7 +133,6 @@ function CancelRequestDialog({
               onClick={async () => {
                 setIsSubmitting(true);
                 try {
-                  // submitCancelRequest is called from parent which has campaignId + userId
                   onSubmitted({ reason } as any);
                 } finally {
                   setIsSubmitting(false);
@@ -149,6 +148,21 @@ function CancelRequestDialog({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ── Cancelled Banner ──────────────────────────────────────────
+function CancelledBanner() {
+  return (
+    <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">
+      <Ban className="w-5 h-5 shrink-0 mt-0.5 text-red-500" />
+      <div>
+        <p className="font-semibold">This campaign has been cancelled</p>
+        <p className="mt-0.5 text-red-700">
+          Editing and posting updates are disabled. ETH donations are now refundable on-chain.
+        </p>
+      </div>
+    </div>
   );
 }
 
@@ -212,6 +226,10 @@ export default function CampaignManage() {
 
   const isOrganizer = campaign?.organizer.id === user?.id;
 
+  // ── Derived: is this campaign fully cancelled? ──────────────
+  const isCancelled =
+    campaign?.status === 'cancelled' || cancelRequest?.status === 'approved';
+
   if (!isOrganizer && !isLoading) {
     return (
       <div className="min-h-[60vh] flex flex-col items-center justify-center">
@@ -233,6 +251,7 @@ export default function CampaignManage() {
   }
 
   const handlePostUpdate = async () => {
+    if (isCancelled) return;
     if (!updateTitle.trim() || !updateContent.trim()) {
       toast.error('Please fill in both title and content');
       return;
@@ -272,6 +291,7 @@ export default function CampaignManage() {
   };
 
   const handleSaveCampaign = async () => {
+    if (isCancelled) return;
     if (!editTitle.trim()) { toast.error('Title cannot be empty'); return; }
     setIsSaving(true);
     try {
@@ -318,7 +338,7 @@ export default function CampaignManage() {
   // Cancel request status badge
   const cancelRequestBadge = cancelRequest ? {
     pending:  <Badge className="bg-amber-100 text-amber-700 border-0 text-xs">Cancel Pending Review</Badge>,
-    approved: <Badge className="bg-red-100 text-red-700 border-0 text-xs">Cancel Approved</Badge>,
+    approved: <Badge className="bg-red-100 text-red-700 border-0 text-xs">Cancelled</Badge>,
     rejected: <Badge className="bg-slate-100 text-slate-600 border-0 text-xs">Cancel Rejected</Badge>,
   }[cancelRequest.status] : null;
 
@@ -329,8 +349,14 @@ export default function CampaignManage() {
           <ArrowLeft className="w-4 h-4 mr-2" /> Back
         </Button>
         <h1 className="text-2xl font-bold">Manage Campaign</h1>
-        <Badge className={campaign.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}>
-          {campaign.status}
+        <Badge className={
+          isCancelled
+            ? 'bg-red-100 text-red-700'
+            : campaign.status === 'active'
+              ? 'bg-emerald-100 text-emerald-700'
+              : 'bg-slate-100 text-slate-600'
+        }>
+          {isCancelled ? 'cancelled' : campaign.status}
         </Badge>
         {cancelRequestBadge}
       </div>
@@ -338,7 +364,7 @@ export default function CampaignManage() {
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {/* Sidebar */}
         <div className="lg:col-span-1 space-y-4">
-          <Card>
+          <Card className={isCancelled ? 'opacity-75' : ''}>
             <CardContent className="p-4 space-y-2">
               <img
                 src={campaign.image}
@@ -373,10 +399,18 @@ export default function CampaignManage() {
             </CardContent>
           </Card>
 
-          {/* Cancel button — submits a request, not an immediate cancel */}
-          <Card className="border-destructive/20">
+          {/* Cancel / status card */}
+          <Card className={isCancelled ? 'border-red-200 bg-red-50/40' : 'border-destructive/20'}>
             <CardContent className="p-4">
-              {cancelRequest?.status === 'pending' ? (
+              {isCancelled ? (
+                <div className="flex flex-col items-center gap-2 text-center">
+                  <Ban className="w-5 h-5 text-red-500" />
+                  <p className="text-xs font-semibold text-red-700">Campaign Cancelled</p>
+                  <p className="text-[10px] text-red-500">
+                    ETH donations are now refundable on-chain.
+                  </p>
+                </div>
+              ) : cancelRequest?.status === 'pending' ? (
                 <Button
                   variant="outline"
                   size="sm"
@@ -386,10 +420,6 @@ export default function CampaignManage() {
                   <Clock className="w-3 h-3 mr-2" />
                   View Cancel Request
                 </Button>
-              ) : cancelRequest?.status === 'approved' ? (
-                <p className="text-xs text-center text-destructive font-medium">
-                  This campaign has been cancelled.
-                </p>
               ) : (
                 <Button
                   variant="destructive"
@@ -404,9 +434,11 @@ export default function CampaignManage() {
                   Request Cancellation
                 </Button>
               )}
-              <p className="text-[10px] text-muted-foreground text-center mt-2">
-                Cancellation requires admin approval
-              </p>
+              {!isCancelled && (
+                <p className="text-[10px] text-muted-foreground text-center mt-2">
+                  Cancellation requires admin approval
+                </p>
+              )}
             </CardContent>
           </Card>
         </div>
@@ -428,6 +460,8 @@ export default function CampaignManage() {
 
             {/* Overview Tab */}
             <TabsContent value="overview" className="space-y-6">
+              {isCancelled && <CancelledBanner />}
+
               <Card>
                 <CardHeader>
                   <CardTitle>Campaign Performance</CardTitle>
@@ -447,28 +481,36 @@ export default function CampaignManage() {
                 </CardContent>
               </Card>
 
-              <Card>
+              <Card className={isCancelled ? 'opacity-60 pointer-events-none' : ''}>
                 <CardHeader className="flex flex-row items-center justify-between">
                   <div>
                     <CardTitle>Campaign Details</CardTitle>
-                    <CardDescription>Edit your campaign's information</CardDescription>
+                    <CardDescription>
+                      {isCancelled
+                        ? 'Editing is disabled for cancelled campaigns'
+                        : "Edit your campaign's information"}
+                    </CardDescription>
                   </div>
-                  {!isEditMode ? (
-                    <Button variant="outline" size="sm" onClick={() => setIsEditMode(true)}>
-                      <Edit className="w-3 h-3 mr-2" /> Edit
-                    </Button>
-                  ) : (
-                    <div className="flex gap-2">
-                      <Button variant="ghost" size="sm" onClick={() => setIsEditMode(false)}>Cancel</Button>
-                      <Button size="sm" onClick={handleSaveCampaign} disabled={isSaving}>
-                        {isSaving ? <Loader2 className="w-3 h-3 animate-spin mr-2" /> : <Save className="w-3 h-3 mr-2" />}
-                        Save
+                  {/* Hide edit controls entirely when cancelled */}
+                  {!isCancelled && (
+                    !isEditMode ? (
+                      <Button variant="outline" size="sm" onClick={() => setIsEditMode(true)}>
+                        <Edit className="w-3 h-3 mr-2" /> Edit
                       </Button>
-                    </div>
+                    ) : (
+                      <div className="flex gap-2">
+                        <Button variant="ghost" size="sm" onClick={() => setIsEditMode(false)}>Cancel</Button>
+                        <Button size="sm" onClick={handleSaveCampaign} disabled={isSaving}>
+                          {isSaving ? <Loader2 className="w-3 h-3 animate-spin mr-2" /> : <Save className="w-3 h-3 mr-2" />}
+                          Save
+                        </Button>
+                      </div>
+                    )
                   )}
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {!isEditMode ? (
+                  {/* Always show read-only view when cancelled, regardless of isEditMode */}
+                  {(!isEditMode || isCancelled) ? (
                     <>
                       <div>
                         <p className="text-xs text-muted-foreground mb-1">Title</p>
@@ -540,70 +582,118 @@ export default function CampaignManage() {
 
             {/* Post Update Tab */}
             <TabsContent value="updates" className="space-y-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Share an Update</CardTitle>
-                  <CardDescription>Keep your supporters informed about campaign progress.</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    <Label>Update Title</Label>
-                    <Input placeholder="e.g., We've reached 50% of our goal!" value={updateTitle} onChange={(e) => setUpdateTitle(e.target.value)} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Update Content</Label>
-                    <Textarea placeholder="Share the latest news about your campaign..." rows={6} value={updateContent} onChange={(e) => setUpdateContent(e.target.value)} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Add Image (Optional)</Label>
-                    {mediaPreview ? (
-                      <div className="relative">
-                        <img src={mediaPreview} alt="Preview" className="w-full h-48 object-contain rounded-lg border bg-muted/30" />
-                        <button type="button" onClick={() => { setMediaFile(null); setMediaPreview(null); }}
-                          className="absolute top-2 right-2 bg-destructive text-white rounded-full w-6 h-6 flex items-center justify-center text-xs hover:bg-destructive/80">
-                          ✕
-                        </button>
+              {isCancelled ? (
+                <>
+                  <CancelledBanner />
+                  {/* Read-only list of past updates when cancelled */}
+                  {updates.length > 0 && (
+                    <Card>
+                      <CardHeader><CardTitle>Previous Updates</CardTitle></CardHeader>
+                      <CardContent className="space-y-4">
+                        {updates.map((update: any) => (
+                          <div key={update.id} className="border rounded-lg p-4">
+                            <p className="font-semibold">{update.title}</p>
+                            <p className="text-xs text-muted-foreground">{new Date(update.created_at).toLocaleDateString()}</p>
+                            <p className="text-sm mt-2 whitespace-pre-wrap">{update.content}</p>
+                          </div>
+                        ))}
+                      </CardContent>
+                    </Card>
+                  )}
+                </>
+              ) : (
+                <>
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Share an Update</CardTitle>
+                      <CardDescription>Keep your supporters informed about campaign progress.</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="space-y-2">
+                        <Label>Update Title</Label>
+                        <Input
+                          placeholder="e.g., We've reached 50% of our goal!"
+                          value={updateTitle}
+                          onChange={(e) => setUpdateTitle(e.target.value)}
+                        />
                       </div>
-                    ) : (
-                      <label className="flex flex-col items-center justify-center border-2 border-dashed rounded-lg p-6 text-center text-muted-foreground cursor-pointer hover:border-primary/50 hover:bg-muted/30 transition-colors">
-                        <ImagePlus className="w-8 h-8 mx-auto mb-2" />
-                        <p className="text-sm font-medium">Click to upload an image</p>
-                        <p className="text-xs mt-1">JPG, PNG, GIF up to 5MB</p>
-                        <input type="file" accept="image/*" className="hidden" onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (!file) return;
-                          if (file.size > 5 * 1024 * 1024) { toast.error('File size must be under 5MB'); return; }
-                          setMediaFile(file);
-                          setMediaPreview(URL.createObjectURL(file));
-                        }} />
-                      </label>
-                    )}
-                  </div>
-                  <Button onClick={handlePostUpdate} disabled={isPostingUpdate || isUploadingMedia} className="w-full">
-                    {isUploadingMedia ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Uploading image...</>
-                      : isPostingUpdate ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Publishing...</>
-                      : <><Send className="w-4 h-4 mr-2" /> Publish Update</>}
-                  </Button>
-                </CardContent>
-              </Card>
-              {updates.length > 0 && (
-                <Card>
-                  <CardHeader><CardTitle>Previous Updates</CardTitle></CardHeader>
-                  <CardContent className="space-y-4">
-                    {updates.map((update: any) => (
-                      <div key={update.id} className="border rounded-lg p-4">
-                        <p className="font-semibold">{update.title}</p>
-                        <p className="text-xs text-muted-foreground">{new Date(update.created_at).toLocaleDateString()}</p>
-                        <p className="text-sm mt-2 whitespace-pre-wrap">{update.content}</p>
+                      <div className="space-y-2">
+                        <Label>Update Content</Label>
+                        <Textarea
+                          placeholder="Share the latest news about your campaign..."
+                          rows={6}
+                          value={updateContent}
+                          onChange={(e) => setUpdateContent(e.target.value)}
+                        />
                       </div>
-                    ))}
-                  </CardContent>
-                </Card>
+                      <div className="space-y-2">
+                        <Label>Add Image (Optional)</Label>
+                        {mediaPreview ? (
+                          <div className="relative">
+                            <img src={mediaPreview} alt="Preview" className="w-full h-48 object-contain rounded-lg border bg-muted/30" />
+                            <button
+                              type="button"
+                              onClick={() => { setMediaFile(null); setMediaPreview(null); }}
+                              className="absolute top-2 right-2 bg-destructive text-white rounded-full w-6 h-6 flex items-center justify-center text-xs hover:bg-destructive/80"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ) : (
+                          <label className="flex flex-col items-center justify-center border-2 border-dashed rounded-lg p-6 text-center text-muted-foreground cursor-pointer hover:border-primary/50 hover:bg-muted/30 transition-colors">
+                            <ImagePlus className="w-8 h-8 mx-auto mb-2" />
+                            <p className="text-sm font-medium">Click to upload an image</p>
+                            <p className="text-xs mt-1">JPG, PNG, GIF up to 5MB</p>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (!file) return;
+                                if (file.size > 5 * 1024 * 1024) { toast.error('File size must be under 5MB'); return; }
+                                setMediaFile(file);
+                                setMediaPreview(URL.createObjectURL(file));
+                              }}
+                            />
+                          </label>
+                        )}
+                      </div>
+                      <Button
+                        onClick={handlePostUpdate}
+                        disabled={isPostingUpdate || isUploadingMedia}
+                        className="w-full"
+                      >
+                        {isUploadingMedia
+                          ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Uploading image...</>
+                          : isPostingUpdate
+                            ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Publishing...</>
+                            : <><Send className="w-4 h-4 mr-2" /> Publish Update</>}
+                      </Button>
+                    </CardContent>
+                  </Card>
+
+                  {updates.length > 0 && (
+                    <Card>
+                      <CardHeader><CardTitle>Previous Updates</CardTitle></CardHeader>
+                      <CardContent className="space-y-4">
+                        {updates.map((update: any) => (
+                          <div key={update.id} className="border rounded-lg p-4">
+                            <p className="font-semibold">{update.title}</p>
+                            <p className="text-xs text-muted-foreground">{new Date(update.created_at).toLocaleDateString()}</p>
+                            <p className="text-sm mt-2 whitespace-pre-wrap">{update.content}</p>
+                          </div>
+                        ))}
+                      </CardContent>
+                    </Card>
+                  )}
+                </>
               )}
             </TabsContent>
 
-            {/* Rewards Tab */}
+            {/* Rewards Tab — read-only, no change needed */}
             <TabsContent value="rewards" className="space-y-6">
+              {isCancelled && <CancelledBanner />}
               <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
                 <Info className="w-5 h-5 shrink-0 mt-0.5 text-amber-600" />
                 <div>
