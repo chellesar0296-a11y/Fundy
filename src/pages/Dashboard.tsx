@@ -443,30 +443,7 @@ export default function Dashboard() {
                   </CardFooter>
                 </Card>
 
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-lg">Impact Tracking</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="space-y-2">
-                      <div className="flex justify-between text-sm">
-                        <span>Education Milestone</span>
-                        <span className="font-medium">80%</span>
-                      </div>
-                      <Progress value={80} className="h-2" />
-                      <p className="text-[10px] text-muted-foreground">You're helping 4 students complete this term!</p>
-                    </div>
-                    <Separator />
-                    <div className="space-y-2">
-                      <div className="flex justify-between text-sm">
-                        <span>Environmental Goal</span>
-                        <span className="font-medium">45%</span>
-                      </div>
-                      <Progress value={45} className="h-2" />
-                      <p className="text-[10px] text-muted-foreground">Your trees are currently being planted in the Amazon.</p>
-                    </div>
-                  </CardContent>
-                </Card>
+              
               </div>
             </motion.div>
           </TabsContent>
