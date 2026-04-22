@@ -33,13 +33,36 @@ export function useCampaigns() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let stale = false;
+
+    const timeout = setTimeout(() => {
+      if (!stale) {
+        setIsLoading(false);
+        setError('Request timed out. Check your Supabase connection.');
+      }
+    }, 10_000);
+
     fetchCampaigns()
-      .then((data) => setCampaigns(data.map(dbCampaignToFrontend)))
-      .catch((err) => {
-        console.error('[Supabase] fetchCampaigns error:', err);
-        setError(err.message);
+      .then((data) => {
+        if (!stale) setCampaigns(data.map(dbCampaignToFrontend));
       })
-      .finally(() => setIsLoading(false));
+      .catch((err) => {
+        if (!stale) {
+          console.error('[Supabase] fetchCampaigns error:', err);
+          setError(err.message);
+        }
+      })
+      .finally(() => {
+        if (!stale) {
+          clearTimeout(timeout);
+          setIsLoading(false);
+        }
+      });
+
+    return () => {
+      stale = true;
+      clearTimeout(timeout);
+    };
   }, []);
 
   return { campaigns, isLoading, error };
@@ -54,10 +77,18 @@ export function useCampaign(id: string) {
   useEffect(() => {
     if (!id) return;
 
+    let stale = false;
+
     setIsLoading(true);
     setRewardTiers([]);
 
-    // Fetch campaign and reward tiers in parallel
+    const timeout = setTimeout(() => {
+      if (!stale) {
+        setIsLoading(false);
+        setError('Request timed out. Check your Supabase connection.');
+      }
+    }, 10_000);
+
     Promise.all([
       fetchCampaignById(id),
       supabase
@@ -67,31 +98,45 @@ export function useCampaign(id: string) {
         .order('min_amount', { ascending: true }),
     ])
       .then(([campaignData, { data: tiers, error: tiersError }]) => {
-        setCampaign(dbCampaignToFrontend(campaignData));
+        if (!stale) {
+          setCampaign(dbCampaignToFrontend(campaignData));
 
-        if (tiersError) {
-          console.error('[useCampaign] reward_tiers error:', tiersError.message);
-          setRewardTiers([]);
-        } else {
-          setRewardTiers(
-            (tiers ?? []).map((t: any) => ({
-              id: t.id,
-              name: t.name,
-              description: t.description,
-              minAmount: Number(t.min_amount),
-              type: t.type,
-              quantity: t.quantity ?? null,
-              tokenAmount: t.token_amount ?? null,
-              isPhysical: t.is_physical ?? false,
-            })),
-          );
+          if (tiersError) {
+            console.error('[useCampaign] reward_tiers error:', tiersError.message);
+            setRewardTiers([]);
+          } else {
+            setRewardTiers(
+              (tiers ?? []).map((t: any) => ({
+                id: t.id,
+                name: t.name,
+                description: t.description,
+                minAmount: Number(t.min_amount),
+                type: t.type,
+                quantity: t.quantity ?? null,
+                tokenAmount: t.token_amount ?? null,
+                isPhysical: t.is_physical ?? false,
+              })),
+            );
+          }
         }
       })
       .catch((err) => {
-        console.error('[useCampaign] error:', err.message);
-        setError(err.message);
+        if (!stale) {
+          console.error('[useCampaign] error:', err.message);
+          setError(err.message);
+        }
       })
-      .finally(() => setIsLoading(false));
+      .finally(() => {
+        if (!stale) {
+          clearTimeout(timeout);
+          setIsLoading(false);
+        }
+      });
+
+    return () => {
+      stale = true;
+      clearTimeout(timeout);
+    };
   }, [id]);
 
   return { campaign, isLoading, error, rewardTiers };
