@@ -190,8 +190,8 @@ export default function Home() {
           className="relative rounded-3xl overflow-hidden bg-primary text-primary-foreground p-12 md:p-20 text-center"
         >
           <div className="absolute inset-0 opacity-10 pointer-events-none">
-             <div className="absolute top-0 left-0 w-64 h-64 bg-white rounded-full blur-[120px] -translate-x-1/2 -translate-y-1/2" />
-             <div className="absolute bottom-0 right-0 w-64 h-64 bg-white rounded-full blur-[120px] translate-x-1/2 translate-y-1/2" />
+            <div className="absolute top-0 left-0 w-64 h-64 bg-white rounded-full blur-[120px] -translate-x-1/2 -translate-y-1/2" />
+            <div className="absolute bottom-0 right-0 w-64 h-64 bg-white rounded-full blur-[120px] translate-x-1/2 translate-y-1/2" />
           </div>
           <div className="relative z-10 max-w-3xl mx-auto">
             <h2 className="text-3xl md:text-5xl font-bold mb-8 leading-tight">
@@ -201,18 +201,37 @@ export default function Home() {
               {t('cta_subtitle', { defaultValue: 'Join thousands of organizers making a real difference. It only takes 5 minutes to set up.' })}
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Link
-                to={ROUTE_PATHS.REGISTER}
-                className="inline-flex items-center justify-center px-8 py-4 rounded-xl bg-white text-primary font-bold text-lg hover:bg-white/90 transition-colors"
-              >
-                {t('btn_register')}
-              </Link>
-              <Link
-                to={ROUTE_PATHS.CAMPAIGNS}
-                className="inline-flex items-center justify-center px-8 py-4 rounded-xl border border-white/30 bg-white/10 text-white font-bold text-lg hover:bg-white/20 transition-colors"
-              >
-                {t('btn_donate')}
-              </Link>
+              {user ? (
+                <>
+                  <Link
+                    to={ROUTE_PATHS.CREATE_CAMPAIGN}
+                    className="inline-flex items-center justify-center px-8 py-4 rounded-xl bg-white text-primary font-bold text-lg hover:bg-white/90 transition-colors"
+                  >
+                    Start a Campaign
+                  </Link>
+                  <Link
+                    to={ROUTE_PATHS.CAMPAIGNS}
+                    className="inline-flex items-center justify-center px-8 py-4 rounded-xl border border-white/30 bg-white/10 text-white font-bold text-lg hover:bg-white/20 transition-colors"
+                  >
+                    {t('btn_donate')}
+                  </Link>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={() => setAuthModal({ open: true, tab: 'register' })}
+                    className="inline-flex items-center justify-center px-8 py-4 rounded-xl bg-white text-primary font-bold text-lg hover:bg-white/90 transition-colors"
+                  >
+                    {t('btn_register')}
+                  </button>
+                  <Link
+                    to={ROUTE_PATHS.CAMPAIGNS}
+                    className="inline-flex items-center justify-center px-8 py-4 rounded-xl border border-white/30 bg-white/10 text-white font-bold text-lg hover:bg-white/20 transition-colors"
+                  >
+                    {t('btn_donate')}
+                  </Link>
+                </>
+              )}
             </div>
           </div>
         </motion.div>
