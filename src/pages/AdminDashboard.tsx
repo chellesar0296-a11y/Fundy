@@ -27,7 +27,11 @@ import {
   fetchReports,
   DbVerificationRequest,
   DbReport,
+  fetchCancelRequests,
+  processCancelRequest,
+  DbCancelRequest,
 } from '@/lib/supabase';
+import { useWeb3 } from '@/context/Web3Context';
 
 // ── Types ─────────────────────────────────────────────────────
 interface AdminCampaign {
@@ -279,22 +283,171 @@ function VerificationDialog({
   );
 }
 
+
+// ── Cancel Request Review Dialog ─────────────────────────────
+function CancelRequestReviewDialog({
+  request,
+  onClose,
+  onProcessed,
+}: {
+  request: DbCancelRequest | null;
+  onClose: () => void;
+  onProcessed: (id: string, action: 'approved' | 'rejected') => void;
+}) {
+  const { user } = useAuth();
+  const { cancelCampaignOnChain } = useWeb3();
+  const [adminNote, setAdminNote] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  useEffect(() => { setAdminNote(''); }, [request?.id]);
+  if (!request) return null;
+
+  const campaign = request.campaigns as any;
+  const organizer = request.profiles as any;
+
+  const handle = async (action: 'approved' | 'rejected') => {
+    setIsProcessing(true);
+    try {
+      // If approving and campaign has an on-chain ID, cancel on-chain first
+      if (action === 'approved' && campaign?.on_chain_id) {
+        try {
+          await cancelCampaignOnChain(Number(campaign.on_chain_id));
+        } catch (chainErr: any) {
+          toast.error('On-chain cancel failed: ' + (chainErr.message ?? 'unknown error'));
+          setIsProcessing(false);
+          return;
+        }
+      }
+
+      await processCancelRequest(
+        request.id,
+        request.campaign_id,
+        action,
+        user!.id,
+        adminNote || undefined,
+        organizer?.email,
+        campaign?.title,
+      );
+
+      onProcessed(request.id, action);
+      onClose();
+      toast.success(action === 'approved'
+        ? 'Campaign cancelled on-chain and organizer notified.'
+        : 'Cancel request rejected. Organizer notified.');
+    } catch (err: any) {
+      toast.error(err.message ?? 'Failed to process request');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  return (
+    <Dialog open={!!request} onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Ban className="w-5 h-5 text-orange-500" /> Review Cancel Request
+          </DialogTitle>
+          <DialogDescription>
+            Review the organizer\'s reason and approve or reject this cancellation.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 text-sm">
+          <div className="grid grid-cols-2 gap-3">
+            {[
+              ['Campaign', campaign?.title ?? request.campaign_id],
+              ['Organizer', organizer?.name ?? '—'],
+              ['Organizer Email', organizer?.email ?? '—'],
+              ['Submitted', new Date(request.created_at).toLocaleDateString()],
+            ].map(([label, val]) => (
+              <div key={label} className="p-3 bg-muted/40 rounded-lg col-span-1">
+                <p className="text-xs text-muted-foreground mb-1">{label}</p>
+                <p className="font-semibold text-xs">{val}</p>
+              </div>
+            ))}
+          </div>
+          <div className="p-3 bg-muted/40 rounded-lg">
+            <p className="text-xs text-muted-foreground mb-1">Organizer\'s Reason</p>
+            <p className="whitespace-pre-wrap">{request.reason}</p>
+          </div>
+          {campaign?.on_chain_id && (
+            <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600" />
+              <span>
+                Approving will call <strong>cancelCampaign(#{campaign.on_chain_id})</strong> on-chain.
+                Donors will be able to claim ETH refunds. FDY tokens earned are kept.
+                Make sure your wallet is connected as admin.
+              </span>
+            </div>
+          )}
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">
+              Admin Note (sent to organizer by email)
+            </label>
+            <Textarea
+              placeholder="Optional note to the organizer..."
+              rows={2}
+              value={adminNote}
+              onChange={(e) => setAdminNote(e.target.value)}
+            />
+          </div>
+          {request.status !== 'pending' && (
+            <div className="p-3 bg-muted/40 rounded-lg">
+              <p className="text-xs text-muted-foreground mb-1">Already {request.status}</p>
+              {request.admin_note && <p className="text-xs">{request.admin_note}</p>}
+            </div>
+          )}
+          {request.status === 'pending' && (
+            <div className="flex gap-3 pt-1">
+              <Button
+                variant="outline"
+                className="flex-1 text-emerald-600 border-emerald-300 hover:bg-emerald-50"
+                onClick={() => handle('rejected')}
+                disabled={isProcessing}
+              >
+                {isProcessing ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <XCircle className="w-4 h-4 mr-2" />}
+                Reject
+              </Button>
+              <Button
+                variant="destructive"
+                className="flex-1"
+                onClick={() => handle('approved')}
+                disabled={isProcessing}
+              >
+                {isProcessing ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Ban className="w-4 h-4 mr-2" />}
+                Approve & Cancel
+              </Button>
+            </div>
+          )}
+          {request.status !== 'pending' && (
+            <Button variant="outline" className="w-full" onClick={onClose}>Close</Button>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ── Main ──────────────────────────────────────────────────────
 export default function AdminDashboard() {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const navigate = useNavigate();
+  const { cancelCampaignOnChain } = useWeb3();
 
   const [campaigns, setCampaigns] = useState<AdminCampaign[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [rewards, setRewards] = useState<AdminReward[]>([]);
   const [verifications, setVerifications] = useState<DbVerificationRequest[]>([]);
   const [reports, setReports] = useState<DbReport[]>([]);
+  const [cancelRequests, setCancelRequests] = useState<DbCancelRequest[]>([]);
 
   const [loadingCampaigns, setLoadingCampaigns] = useState(true);
   const [loadingUsers, setLoadingUsers] = useState(true);
   const [loadingRewards, setLoadingRewards] = useState(true);
   const [loadingVerifications, setLoadingVerifications] = useState(true);
   const [loadingReports, setLoadingReports] = useState(true);
+  const [loadingCancelRequests, setLoadingCancelRequests] = useState(true);
+  const [selectedCancelRequest, setSelectedCancelRequest] = useState<DbCancelRequest | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const [selectedVerification, setSelectedVerification] = useState<DbVerificationRequest | null>(null);
@@ -307,6 +460,7 @@ export default function AdminDashboard() {
     pendingRewards: rewards.filter(r => r.status === 'pending').length,
     pendingVerifications: verifications.filter(v => v.status === 'pending').length,
     pendingReports: reports.filter(r => r.status === 'pending').length,
+    pendingCancelRequests: cancelRequests.filter(r => r.status === 'pending').length,
   };
 
   // ── Loaders ────────────────────────────────────────────────
@@ -404,13 +558,20 @@ export default function AdminDashboard() {
     finally { setLoadingReports(false); }
   }, []);
 
+  const loadCancelRequests = useCallback(async () => {
+    setLoadingCancelRequests(true);
+    try { setCancelRequests(await fetchCancelRequests()); }
+    catch { setCancelRequests([]); }
+    finally { setLoadingCancelRequests(false); }
+  }, []);
+
   useEffect(() => {
-    loadCampaigns(); loadUsers(); loadRewards(); loadVerifications(); loadReports();
+    loadCampaigns(); loadUsers(); loadRewards(); loadVerifications(); loadReports(); loadCancelRequests();
   }, []);
 
   const refresh = async () => {
     setIsRefreshing(true);
-    await Promise.all([loadCampaigns(), loadUsers(), loadRewards(), loadVerifications(), loadReports()]);
+    await Promise.all([loadCampaigns(), loadUsers(), loadRewards(), loadVerifications(), loadReports(), loadCancelRequests()]);
     setIsRefreshing(false);
     toast.success('Data refreshed.');
   };
@@ -518,6 +679,7 @@ export default function AdminDashboard() {
           <StatCard title="Pending rewards"        value={stats.pendingRewards}       icon={Gift}            loading={loadingRewards} color="text-amber-600" />
           <StatCard title="Pending verifications"  value={stats.pendingVerifications} icon={ShieldCheck}     loading={loadingVerifications} color="text-blue-600" />
           <StatCard title="Pending reports"        value={stats.pendingReports}       icon={Flag}            loading={loadingReports} color="text-red-500" />
+          <StatCard title="Cancel requests"        value={stats.pendingCancelRequests} icon={Ban}             loading={loadingCancelRequests} color="text-orange-500" />
         </div>
 
         {/* Tabs */}
@@ -545,6 +707,14 @@ export default function AdminDashboard() {
               {stats.pendingVerifications > 0 && (
                 <span className="ml-1 bg-amber-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
                   {stats.pendingVerifications}
+                </span>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="cancelrequests" className="gap-2 relative">
+              <Ban className="w-4 h-4" /> Cancel Requests
+              {stats.pendingCancelRequests > 0 && (
+                <span className="ml-1 bg-orange-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                  {stats.pendingCancelRequests}
                 </span>
               )}
             </TabsTrigger>
@@ -930,6 +1100,95 @@ export default function AdminDashboard() {
               </CardContent>
             </Card>
           </TabsContent>
+
+          {/* ── Cancel Requests ── */}
+          <TabsContent value="cancelrequests">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Ban className="w-5 h-5 text-orange-500" /> Campaign Cancel Requests
+                </CardTitle>
+                <CardDescription>
+                  Organizers submit these when they want to close their campaign.
+                  Approving will cancel the campaign on-chain (ETH refundable by donors) — FDY tokens earned are kept.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="p-0">
+                {loadingCancelRequests
+                  ? <div className="flex justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>
+                  : cancelRequests.length === 0
+                    ? (
+                      <div className="text-center py-16 text-muted-foreground">
+                        <Ban className="w-12 h-12 mx-auto mb-4 opacity-20" />
+                        <p className="font-medium">No cancel requests yet.</p>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead className="border-b bg-muted/30 text-muted-foreground">
+                            <tr>
+                              <th className="px-4 py-3 text-left font-medium">Campaign</th>
+                              <th className="px-4 py-3 text-left font-medium">Organizer</th>
+                              <th className="px-4 py-3 text-left font-medium">Reason</th>
+                              <th className="px-4 py-3 text-left font-medium">Date</th>
+                              <th className="px-4 py-3 text-left font-medium">Status</th>
+                              <th className="px-4 py-3 text-left font-medium">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {cancelRequests.map((cr) => (
+                              <tr key={cr.id} className="border-b hover:bg-muted/30 transition-colors">
+                                <td className="px-4 py-3">
+                                  <p className="font-medium text-sm">{(cr.campaigns as any)?.title ?? cr.campaign_id}</p>
+                                  {(cr.campaigns as any)?.on_chain_id && (
+                                    <p className="text-xs text-muted-foreground">Chain ID: #{(cr.campaigns as any).on_chain_id}</p>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3 text-xs text-muted-foreground">
+                                  <p className="font-medium text-foreground">{(cr.profiles as any)?.name ?? '—'}</p>
+                                  <p>{(cr.profiles as any)?.email ?? ''}</p>
+                                </td>
+                                <td className="px-4 py-3 text-xs text-muted-foreground max-w-[180px]">
+                                  <span className="line-clamp-3">{cr.reason}</span>
+                                </td>
+                                <td className="px-4 py-3 text-xs text-muted-foreground">
+                                  {new Date(cr.created_at).toLocaleDateString()}
+                                </td>
+                                <td className="px-4 py-3">
+                                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                                    cr.status === 'pending'  ? 'bg-amber-100 text-amber-700'
+                                    : cr.status === 'approved' ? 'bg-red-100 text-red-700'
+                                    : 'bg-slate-100 text-slate-500'
+                                  }`}>
+                                    {cr.status}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3">
+                                  {cr.status === 'pending' && (
+                                    <div className="flex gap-1">
+                                      <Button size="sm" variant="ghost"
+                                        className="text-xs text-muted-foreground hover:text-foreground"
+                                        onClick={() => setSelectedCancelRequest(cr)}>
+                                        <Eye className="w-3 h-3 mr-1" /> Review
+                                      </Button>
+                                    </div>
+                                  )}
+                                  {cr.status !== 'pending' && (
+                                    <Button size="sm" variant="ghost" className="text-xs text-muted-foreground"
+                                      onClick={() => setSelectedCancelRequest(cr)}>
+                                      <Eye className="w-3 h-3 mr-1" /> View
+                                    </Button>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+              </CardContent>
+            </Card>
+          </TabsContent>
         </Tabs>
       </motion.div>
 
@@ -945,6 +1204,17 @@ export default function AdminDashboard() {
         onProcessed={(id, action, note) =>
           setVerifications(prev => prev.map(v => v.id === id ? { ...v, status: action, admin_note: note } : v))
         }
+      />
+      <CancelRequestReviewDialog
+        request={selectedCancelRequest}
+        onClose={() => setSelectedCancelRequest(null)}
+        onProcessed={(id, action) => {
+          setCancelRequests(prev => prev.map(r => r.id === id ? { ...r, status: action } : r));
+          if (action === 'approved') {
+            const req = cancelRequests.find(r => r.id === id);
+            if (req) setCampaigns(prev => prev.map(c => c.id === req.campaign_id ? { ...c, status: 'cancelled' } : c));
+          }
+        }}
       />
     </div>
   );

@@ -1,7 +1,5 @@
-// CampaignManage.tsx
 import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
 import { useCampaign } from '@/hooks/useCampaigns';
 import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
@@ -14,27 +12,147 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { toast } from 'sonner';
 import {
-  ArrowLeft,
-  Loader2,
-  Megaphone,
-  Gift,
-  MessageCircle,
-  TrendingUp,
-  Send,
-  ImagePlus,
-  Trash2,
-  Edit,
-  Save,
-  Info,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from '@/components/ui/dialog';
+import {
+  ArrowLeft, Loader2, Gift, MessageCircle, TrendingUp,
+  Send, ImagePlus, Trash2, Edit, Save, Info, Clock, XCircle, CheckCircle2,
 } from 'lucide-react';
 import {
   createCampaignUpdate,
-  cancelCampaign,
   getCampaignUpdates,
   updateCampaign,
   uploadMedia,
+  submitCancelRequest,
+  fetchMyCancelRequest,
+  DbCancelRequest,
 } from '@/lib/supabase';
 
+// ── Cancel Request Dialog ─────────────────────────────────────
+function CancelRequestDialog({
+  open,
+  onClose,
+  onSubmitted,
+  existingRequest,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSubmitted: (req: DbCancelRequest) => void;
+  existingRequest: DbCancelRequest | null;
+}) {
+  const [reason, setReason] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  if (existingRequest) {
+    const statusIcon = {
+      pending:  <Clock className="w-5 h-5 text-amber-500" />,
+      approved: <CheckCircle2 className="w-5 h-5 text-emerald-500" />,
+      rejected: <XCircle className="w-5 h-5 text-destructive" />,
+    }[existingRequest.status];
+
+    const statusColor = {
+      pending:  'bg-amber-100 text-amber-700',
+      approved: 'bg-emerald-100 text-emerald-700',
+      rejected: 'bg-red-100 text-red-700',
+    }[existingRequest.status];
+
+    return (
+      <Dialog open={open} onOpenChange={onClose}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {statusIcon} Cancel Request Status
+            </DialogTitle>
+            <DialogDescription>Your cancel request has been submitted and is being reviewed.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 pt-2 text-sm">
+            <div className="p-3 bg-muted/40 rounded-lg">
+              <p className="text-xs text-muted-foreground mb-1">Your reason</p>
+              <p>{existingRequest.reason}</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground">Status:</span>
+              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${statusColor}`}>
+                {existingRequest.status.charAt(0).toUpperCase() + existingRequest.status.slice(1)}
+              </span>
+            </div>
+            {existingRequest.admin_note && (
+              <div className="p-3 bg-muted/40 rounded-lg">
+                <p className="text-xs text-muted-foreground mb-1">Admin note</p>
+                <p>{existingRequest.admin_note}</p>
+              </div>
+            )}
+            {existingRequest.status === 'pending' && (
+              <p className="text-xs text-muted-foreground">
+                Your campaign remains active while this request is under review.
+              </p>
+            )}
+            <Button variant="outline" className="w-full" onClick={onClose}>Close</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-destructive">
+            <Trash2 className="w-5 h-5" /> Request Campaign Cancellation
+          </DialogTitle>
+          <DialogDescription>
+            Your request will be reviewed by our admin team. Your campaign stays active until approved.
+            Once cancelled, <strong>ETH donations will be refundable on-chain</strong> — FDY tokens already earned are kept by donors.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 pt-2">
+          <div className="space-y-1.5">
+            <Label>
+              Reason for cancellation <span className="text-destructive">*</span>
+            </Label>
+            <Textarea
+              placeholder="Please explain why you want to cancel this campaign..."
+              rows={4}
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+            />
+          </div>
+          <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+            <Info className="w-4 h-4 shrink-0 mt-0.5 text-amber-600" />
+            <span>Admin will review your request and may approve or reject it. You will be notified by email.</span>
+          </div>
+          <div className="flex gap-3 pt-1">
+            <Button variant="outline" className="flex-1" onClick={onClose}>
+              Back
+            </Button>
+            <Button
+              variant="destructive"
+              className="flex-1"
+              disabled={isSubmitting || !reason.trim()}
+              onClick={async () => {
+                setIsSubmitting(true);
+                try {
+                  // submitCancelRequest is called from parent which has campaignId + userId
+                  onSubmitted({ reason } as any);
+                } finally {
+                  setIsSubmitting(false);
+                }
+              }}
+            >
+              {isSubmitting
+                ? <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                : <Send className="w-4 h-4 mr-2" />}
+              Submit Request
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── Main ──────────────────────────────────────────────────────
 export default function CampaignManage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -60,6 +178,11 @@ export default function CampaignManage() {
   const [editEndDate, setEditEndDate] = useState('');
   const [editImageUrl, setEditImageUrl] = useState('');
 
+  // Cancel request state
+  const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [cancelRequest, setCancelRequest] = useState<DbCancelRequest | null>(null);
+  const [loadingCancelRequest, setLoadingCancelRequest] = useState(false);
+
   // Load updates
   React.useEffect(() => {
     if (id) {
@@ -78,7 +201,15 @@ export default function CampaignManage() {
     }
   }, [campaign?.id]);
 
-  // Check if user is the organizer
+  // Load existing cancel request
+  React.useEffect(() => {
+    if (id) {
+      fetchMyCancelRequest(id)
+        .then(setCancelRequest)
+        .catch(() => setCancelRequest(null));
+    }
+  }, [id]);
+
   const isOrganizer = campaign?.organizer.id === user?.id;
 
   if (!isOrganizer && !isLoading) {
@@ -108,19 +239,17 @@ export default function CampaignManage() {
     }
     setIsPostingUpdate(true);
     try {
-      // Upload media if selected
       let imageUrl: string | null = null;
       if (mediaFile) {
         setIsUploadingMedia(true);
         try {
           imageUrl = await uploadMedia(mediaFile, `updates/${id}`);
-        } catch (uploadErr) {
+        } catch {
           toast.error('Failed to upload image. Post will be saved without it.');
         } finally {
           setIsUploadingMedia(false);
         }
       }
-
       await createCampaignUpdate({
         campaign_id: id!,
         title: updateTitle,
@@ -134,9 +263,8 @@ export default function CampaignManage() {
       setUpdateContent('');
       setMediaFile(null);
       setMediaPreview(null);
-      const newUpdates = await getCampaignUpdates(id!);
-      setUpdates(newUpdates);
-    } catch (error) {
+      setUpdates(await getCampaignUpdates(id!));
+    } catch {
       toast.error('Failed to post update');
     } finally {
       setIsPostingUpdate(false);
@@ -144,10 +272,7 @@ export default function CampaignManage() {
   };
 
   const handleSaveCampaign = async () => {
-    if (!editTitle.trim()) {
-      toast.error('Title cannot be empty');
-      return;
-    }
+    if (!editTitle.trim()) { toast.error('Title cannot be empty'); return; }
     setIsSaving(true);
     try {
       await updateCampaign(id!, {
@@ -166,17 +291,36 @@ export default function CampaignManage() {
     }
   };
 
-  const handleCancelCampaign = async () => {
-    if (confirm('Are you sure you want to cancel this campaign? This action cannot be undone.')) {
-      try {
-        await cancelCampaign(id!);
-        toast.success('Campaign cancelled');
-        navigate('/dashboard');
-      } catch (error) {
-        toast.error('Failed to cancel campaign');
-      }
+  const handleOpenCancelDialog = async () => {
+    setLoadingCancelRequest(true);
+    try {
+      const req = await fetchMyCancelRequest(id!);
+      setCancelRequest(req);
+    } catch {
+      setCancelRequest(null);
+    } finally {
+      setLoadingCancelRequest(false);
+      setShowCancelDialog(true);
     }
   };
+
+  const handleCancelSubmit = async (partial: DbCancelRequest) => {
+    try {
+      const req = await submitCancelRequest(id!, user!.id, partial.reason);
+      setCancelRequest(req);
+      setShowCancelDialog(false);
+      toast.success('Cancel request submitted. Admin will review it shortly.');
+    } catch (err: any) {
+      toast.error(err.message ?? 'Failed to submit cancel request');
+    }
+  };
+
+  // Cancel request status badge
+  const cancelRequestBadge = cancelRequest ? {
+    pending:  <Badge className="bg-amber-100 text-amber-700 border-0 text-xs">Cancel Pending Review</Badge>,
+    approved: <Badge className="bg-red-100 text-red-700 border-0 text-xs">Cancel Approved</Badge>,
+    rejected: <Badge className="bg-slate-100 text-slate-600 border-0 text-xs">Cancel Rejected</Badge>,
+  }[cancelRequest.status] : null;
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-10">
@@ -188,6 +332,7 @@ export default function CampaignManage() {
         <Badge className={campaign.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}>
           {campaign.status}
         </Badge>
+        {cancelRequestBadge}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
@@ -228,20 +373,39 @@ export default function CampaignManage() {
             </CardContent>
           </Card>
 
+          {/* Cancel button — submits a request, not an immediate cancel */}
           <Card className="border-destructive/20">
             <CardContent className="p-4">
-              <Button
-                variant="destructive"
-                size="sm"
-                className="w-full"
-                onClick={handleCancelCampaign}
-                disabled={campaign.status !== 'active'}
-              >
-                <Trash2 className="w-3 h-3 mr-2" />
-                Cancel Campaign
-              </Button>
+              {cancelRequest?.status === 'pending' ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full text-amber-600 border-amber-300"
+                  onClick={handleOpenCancelDialog}
+                >
+                  <Clock className="w-3 h-3 mr-2" />
+                  View Cancel Request
+                </Button>
+              ) : cancelRequest?.status === 'approved' ? (
+                <p className="text-xs text-center text-destructive font-medium">
+                  This campaign has been cancelled.
+                </p>
+              ) : (
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  className="w-full"
+                  onClick={handleOpenCancelDialog}
+                  disabled={campaign.status !== 'active' || loadingCancelRequest}
+                >
+                  {loadingCancelRequest
+                    ? <Loader2 className="w-3 h-3 animate-spin mr-2" />
+                    : <Trash2 className="w-3 h-3 mr-2" />}
+                  Request Cancellation
+                </Button>
+              )}
               <p className="text-[10px] text-muted-foreground text-center mt-2">
-                This will permanently close the campaign
+                Cancellation requires admin approval
               </p>
             </CardContent>
           </Card>
@@ -262,7 +426,7 @@ export default function CampaignManage() {
               </TabsTrigger>
             </TabsList>
 
-            {/* Overview Tab — performance + edit fields */}
+            {/* Overview Tab */}
             <TabsContent value="overview" className="space-y-6">
               <Card>
                 <CardHeader>
@@ -283,7 +447,6 @@ export default function CampaignManage() {
                 </CardContent>
               </Card>
 
-              {/* Edit campaign details */}
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between">
                   <div>
@@ -296,9 +459,7 @@ export default function CampaignManage() {
                     </Button>
                   ) : (
                     <div className="flex gap-2">
-                      <Button variant="ghost" size="sm" onClick={() => setIsEditMode(false)}>
-                        Cancel
-                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => setIsEditMode(false)}>Cancel</Button>
                       <Button size="sm" onClick={handleSaveCampaign} disabled={isSaving}>
                         {isSaving ? <Loader2 className="w-3 h-3 animate-spin mr-2" /> : <Save className="w-3 h-3 mr-2" />}
                         Save
@@ -328,43 +489,24 @@ export default function CampaignManage() {
                     <>
                       <div className="space-y-2">
                         <Label>Campaign Title</Label>
-                        <Input
-                          value={editTitle}
-                          onChange={(e) => setEditTitle(e.target.value)}
-                        />
+                        <Input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} />
                       </div>
                       <div className="space-y-2">
                         <Label>Short Description</Label>
-                        <Input
-                          value={editShortDesc}
-                          onChange={(e) => setEditShortDesc(e.target.value)}
-                          placeholder="A short summary of your campaign"
-                        />
+                        <Input value={editShortDesc} onChange={(e) => setEditShortDesc(e.target.value)} />
                       </div>
                       <div className="space-y-2">
                         <Label>Full Description</Label>
-                        <Textarea
-                          value={editDesc}
-                          onChange={(e) => setEditDesc(e.target.value)}
-                          rows={6}
-                        />
+                        <Textarea value={editDesc} onChange={(e) => setEditDesc(e.target.value)} rows={6} />
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div className="space-y-2">
                           <Label>End Date</Label>
-                          <Input
-                            type="date"
-                            value={editEndDate}
-                            onChange={(e) => setEditEndDate(e.target.value)}
-                          />
+                          <Input type="date" value={editEndDate} onChange={(e) => setEditEndDate(e.target.value)} />
                         </div>
                         <div className="space-y-2">
                           <Label>Campaign Image URL</Label>
-                          <Input
-                            value={editImageUrl}
-                            onChange={(e) => setEditImageUrl(e.target.value)}
-                            placeholder="https://..."
-                          />
+                          <Input value={editImageUrl} onChange={(e) => setEditImageUrl(e.target.value)} placeholder="https://..." />
                         </div>
                       </div>
                       <div className="flex items-start gap-2 p-3 bg-muted/40 rounded-lg text-xs text-muted-foreground">
@@ -377,9 +519,7 @@ export default function CampaignManage() {
               </Card>
 
               <Card>
-                <CardHeader>
-                  <CardTitle>Recent Updates</CardTitle>
-                </CardHeader>
+                <CardHeader><CardTitle>Recent Updates</CardTitle></CardHeader>
                 <CardContent>
                   {updates.length === 0 ? (
                     <p className="text-center text-muted-foreground py-8">No updates yet. Post your first update!</p>
@@ -403,42 +543,24 @@ export default function CampaignManage() {
               <Card>
                 <CardHeader>
                   <CardTitle>Share an Update</CardTitle>
-                  <CardDescription>
-                    Keep your supporters informed about campaign progress, milestones, and how their donations are making an impact.
-                  </CardDescription>
+                  <CardDescription>Keep your supporters informed about campaign progress.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="space-y-2">
                     <Label>Update Title</Label>
-                    <Input
-                      placeholder="e.g., We've reached 50% of our goal!"
-                      value={updateTitle}
-                      onChange={(e) => setUpdateTitle(e.target.value)}
-                    />
+                    <Input placeholder="e.g., We've reached 50% of our goal!" value={updateTitle} onChange={(e) => setUpdateTitle(e.target.value)} />
                   </div>
                   <div className="space-y-2">
                     <Label>Update Content</Label>
-                    <Textarea
-                      placeholder="Share the latest news, photos, or videos about your campaign..."
-                      rows={6}
-                      value={updateContent}
-                      onChange={(e) => setUpdateContent(e.target.value)}
-                    />
+                    <Textarea placeholder="Share the latest news about your campaign..." rows={6} value={updateContent} onChange={(e) => setUpdateContent(e.target.value)} />
                   </div>
                   <div className="space-y-2">
                     <Label>Add Image (Optional)</Label>
                     {mediaPreview ? (
                       <div className="relative">
-                        <img
-                          src={mediaPreview}
-                          alt="Preview"
-                          className="w-full h-48 object-contain rounded-lg border bg-muted/30"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => { setMediaFile(null); setMediaPreview(null); }}
-                          className="absolute top-2 right-2 bg-destructive text-white rounded-full w-6 h-6 flex items-center justify-center text-xs hover:bg-destructive/80"
-                        >
+                        <img src={mediaPreview} alt="Preview" className="w-full h-48 object-contain rounded-lg border bg-muted/30" />
+                        <button type="button" onClick={() => { setMediaFile(null); setMediaPreview(null); }}
+                          className="absolute top-2 right-2 bg-destructive text-white rounded-full w-6 h-6 flex items-center justify-center text-xs hover:bg-destructive/80">
                           ✕
                         </button>
                       </div>
@@ -447,52 +569,31 @@ export default function CampaignManage() {
                         <ImagePlus className="w-8 h-8 mx-auto mb-2" />
                         <p className="text-sm font-medium">Click to upload an image</p>
                         <p className="text-xs mt-1">JPG, PNG, GIF up to 5MB</p>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (!file) return;
-                            if (file.size > 5 * 1024 * 1024) {
-                              toast.error('File size must be under 5MB');
-                              return;
-                            }
-                            setMediaFile(file);
-                            setMediaPreview(URL.createObjectURL(file));
-                          }}
-                        />
+                        <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          if (file.size > 5 * 1024 * 1024) { toast.error('File size must be under 5MB'); return; }
+                          setMediaFile(file);
+                          setMediaPreview(URL.createObjectURL(file));
+                        }} />
                       </label>
                     )}
                   </div>
                   <Button onClick={handlePostUpdate} disabled={isPostingUpdate || isUploadingMedia} className="w-full">
-                    {isUploadingMedia
-                      ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Uploading image...</>
-                      : isPostingUpdate
-                        ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Publishing...</>
-                        : <><Send className="w-4 h-4 mr-2" /> Publish Update</>
-                    }
+                    {isUploadingMedia ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Uploading image...</>
+                      : isPostingUpdate ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Publishing...</>
+                      : <><Send className="w-4 h-4 mr-2" /> Publish Update</>}
                   </Button>
                 </CardContent>
               </Card>
-
-              {/* Previous Updates */}
               {updates.length > 0 && (
                 <Card>
-                  <CardHeader>
-                    <CardTitle>Previous Updates</CardTitle>
-                  </CardHeader>
+                  <CardHeader><CardTitle>Previous Updates</CardTitle></CardHeader>
                   <CardContent className="space-y-4">
                     {updates.map((update: any) => (
                       <div key={update.id} className="border rounded-lg p-4">
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <p className="font-semibold">{update.title}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {new Date(update.created_at).toLocaleDateString()} at {new Date(update.created_at).toLocaleTimeString()}
-                            </p>
-                          </div>
-                        </div>
+                        <p className="font-semibold">{update.title}</p>
+                        <p className="text-xs text-muted-foreground">{new Date(update.created_at).toLocaleDateString()}</p>
                         <p className="text-sm mt-2 whitespace-pre-wrap">{update.content}</p>
                       </div>
                     ))}
@@ -501,13 +602,13 @@ export default function CampaignManage() {
               )}
             </TabsContent>
 
-            {/* Rewards Tab — read-only */}
+            {/* Rewards Tab */}
             <TabsContent value="rewards" className="space-y-6">
               <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
                 <Info className="w-5 h-5 shrink-0 mt-0.5 text-amber-600" />
                 <div>
                   <p className="font-semibold">Reward tiers are locked after campaign creation</p>
-                  <p className="mt-0.5 text-amber-700">To protect your backers' rights, reward tiers cannot be edited or removed once the campaign is live. You may add new tiers if desired — contact support to do so.</p>
+                  <p className="mt-0.5 text-amber-700">Reward tiers cannot be edited once the campaign is live. Contact support to add new tiers.</p>
                 </div>
               </div>
               <Card>
@@ -540,6 +641,14 @@ export default function CampaignManage() {
           </Tabs>
         </div>
       </div>
+
+      {/* Cancel Request Dialog */}
+      <CancelRequestDialog
+        open={showCancelDialog}
+        onClose={() => setShowCancelDialog(false)}
+        onSubmitted={handleCancelSubmit}
+        existingRequest={cancelRequest}
+      />
     </div>
   );
 }

@@ -30,24 +30,27 @@ const queryClient = new QueryClient({
 
 // Inner component so we can access useAuth for userId
 function AppWithWeb3() {
-  const { user } = useAuth();
+  const { user, isLoading } = useAuth();
+
+  if (isLoading) return null;
+
   return (
     <Web3Provider userId={user?.id} boundWalletAddress={user?.walletAddress ?? null}>
       <Layout>
         <Routes>
-          <Route path={ROUTE_PATHS.HOME}            element={<Home />} />
-          <Route path={ROUTE_PATHS.CAMPAIGNS}       element={<Campaigns />} />
+          <Route path={ROUTE_PATHS.HOME} element={<Home />} />
+          <Route path={ROUTE_PATHS.CAMPAIGNS} element={<Campaigns />} />
           <Route path={ROUTE_PATHS.CAMPAIGN_DETAIL} element={<CampaignDetail />} />
-          <Route path="/campaign/:id/manage"        element={<CampaignManage />} />
-          <Route path={ROUTE_PATHS.ABOUT}           element={<About />} />
-          <Route path={ROUTE_PATHS.DASHBOARD}       element={<Dashboard />} />
-          <Route path="/create-campaign"            element={<CreateCampaign />} />
-          <Route path="/rewards"                    element={<Rewards />} />
-          <Route path="/admin"                      element={<AdminDashboard />} />
-          <Route path="/verify"                     element={<VerificationRequest />} />
-          <Route path={ROUTE_PATHS.LOGIN}           element={<Home />} />
-          <Route path={ROUTE_PATHS.REGISTER}        element={<Home />} />
-          <Route path="*"                           element={<Home />} />
+          <Route path="/campaign/:id/manage" element={<CampaignManage />} />
+          <Route path={ROUTE_PATHS.ABOUT} element={<About />} />
+          <Route path={ROUTE_PATHS.DASHBOARD} element={<Dashboard />} />
+          <Route path="/create-campaign" element={<CreateCampaign />} />
+          <Route path="/rewards" element={<Rewards />} />
+          <Route path="/admin" element={<AdminDashboard />} />
+          <Route path="/verify" element={<VerificationRequest />} />
+          <Route path={ROUTE_PATHS.LOGIN} element={<Home />} />
+          <Route path={ROUTE_PATHS.REGISTER} element={<Home />} />
+          <Route path="*" element={<Home />} />
         </Routes>
       </Layout>
     </Web3Provider>

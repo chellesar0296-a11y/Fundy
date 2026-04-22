@@ -3,17 +3,19 @@ import { ethers } from 'ethers';
 import { supabase } from '@/lib/supabase';
 
 export const CONTRACT_ADDRESSES = {
-  crowdfunding: '0x0000000000000000000000000000000000000000', // UPDATE after redeploy
-  token:        '0x0000000000000000000000000000000000000000', // UPDATE after redeploy
-  nft:          '0x0000000000000000000000000000000000000000', // UPDATE after redeploy
+  crowdfunding: '0x4dd21289dd70ce0B7780767200E62ddD82be2B76',
+  token:        '0x292F9aa64aCE775DCf14815b5858dE37e0529414',
+  nft:          '0xfEC21dF4cb6B7562095D05281932c5135Dc422Ac',
 };
 
 export const CROWDFUNDING_ABI = [
   // Views
   'function campaignCount() view returns (uint256)',
-  'function getCampaign(uint256) view returns (tuple(string supabaseId, address organizer, uint256 goalAmount, uint256 deadline, uint256 totalRaised, bool withdrawn, bool cancelled, bool hasExtraToken, uint256 extraTokenAmount, uint256 extraTokenMinDonate, bool hasNft))',
-  'function getDonation(uint256, address) view returns (uint256)',
+  'function getCampaign(uint256) view returns (tuple(string supabaseId, address organizer, uint256 goalAmount, uint256 deadline, uint256 totalRaisedEth, uint256 totalRaisedFdy, bool withdrawn, bool cancelled, bool hasExtraToken, uint256 extraTokenAmount, uint256 extraTokenMinDonate, bool hasNft))',
+  'function getEthDonation(uint256, address) view returns (uint256)',
+  'function getFdyDonation(uint256, address) view returns (uint256)',
   'function getDonors(uint256) view returns (address[])',
+  'function totalRaised(uint256) view returns (uint256)',
   'function isGoalReached(uint256) view returns (bool)',
   'function isRefundable(uint256) view returns (bool)',
   // Write
@@ -29,8 +31,9 @@ export const CROWDFUNDING_ABI = [
   'event ExtraFdyAwarded(uint256 indexed campaignId, address indexed donor, uint256 fdyAmount)',
   'event NftAwarded(uint256 indexed campaignId, address indexed donor, uint256 tokenId)',
   'event FdyDonation(uint256 indexed campaignId, address indexed donor, uint256 fdyBurned, uint256 ethEquivalent)',
-  'event FundsWithdrawn(uint256 indexed campaignId, address organizer, uint256 amount)',
-  'event RefundIssued(uint256 indexed campaignId, address indexed donor, uint256 amount)',
+  'event FundsWithdrawn(uint256 indexed campaignId, address organizer, uint256 ethAmount, uint256 fdyEquivalent)',
+  'event EthRefundIssued(uint256 indexed campaignId, address indexed donor, uint256 amount)',
+  'event FdyRefundIssued(uint256 indexed campaignId, address indexed donor, uint256 fdyAmount)',
   'event CampaignCancelled(uint256 indexed campaignId)',
 ];
 
@@ -277,7 +280,7 @@ export function Web3Provider({
   const claimRefund           = useCallback(async (id: number) => (await (await cf(true).claimRefund(id)).wait()), [cf]);
   const cancelCampaignOnChain = useCallback(async (id: number) => (await (await cf(true).cancelCampaign(id)).wait()), [cf]);
   const getCampaignOnChain    = useCallback(async (id: number) => await cf().getCampaign(id), [cf]);
-  const getDonationAmount     = useCallback(async (id: number, donor: string) => ethers.formatEther(await cf().getDonation(id, donor)), [cf]);
+  const getDonationAmount     = useCallback(async (id: number, donor: string) => ethers.formatEther(await cf().getEthDonation(id, donor)), [cf]);
 
   return (
     <Web3Context.Provider value={{

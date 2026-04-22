@@ -496,3 +496,160 @@ export async function bindWalletAddress(userId: string, walletAddress: string) {
     .eq('id', userId);
   if (error) throw error;
 }
+
+// ── Cancel Requests ───────────────────────────────────────────
+// Organizers submit a cancel request with a reason.
+// Admin can approve (→ cancels campaign + notifies organizer) or reject.
+// FDY tokens are NOT refunded — only ETH donations are refundable on-chain.
+
+export interface DbCancelRequest {
+  id: string;
+  campaign_id: string;
+  organizer_id: string;
+  reason: string;
+  status: 'pending' | 'approved' | 'rejected';
+  admin_note: string | null;
+  reviewed_by: string | null;
+  created_at: string;
+  updated_at: string | null;
+  // joined
+  campaigns?: DbCampaign;
+  profiles?: DbProfile;
+}
+
+/** Organizer: submit a cancel request for their campaign. */
+export async function submitCancelRequest(
+  campaignId: string,
+  organizerId: string,
+  reason: string,
+): Promise<DbCancelRequest> {
+  // Prevent duplicate pending requests
+  const { data: existing } = await supabase
+    .from('cancel_requests')
+    .select('id')
+    .eq('campaign_id', campaignId)
+    .eq('status', 'pending')
+    .maybeSingle();
+
+  if (existing) throw new Error('A cancel request is already pending for this campaign.');
+
+  const { data, error } = await supabase
+    .from('cancel_requests')
+    .insert({
+      campaign_id: campaignId,
+      organizer_id: organizerId,
+      reason,
+      status: 'pending',
+      created_at: new Date().toISOString(),
+    })
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data as DbCancelRequest;
+}
+
+/** Admin: fetch all cancel requests. */
+export async function fetchCancelRequests(): Promise<DbCancelRequest[]> {
+  const { data, error } = await supabase
+    .from('cancel_requests')
+    .select('*, campaigns(title, organizer_id, on_chain_id, status), profiles:organizer_id(name, email)')
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return data as DbCancelRequest[];
+}
+
+/** Organizer: fetch their own campaign's cancel request. */
+export async function fetchMyCancelRequest(campaignId: string): Promise<DbCancelRequest | null> {
+  const { data, error } = await supabase
+    .from('cancel_requests')
+    .select('*')
+    .eq('campaign_id', campaignId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data as DbCancelRequest | null;
+}
+
+/**
+ * Admin: approve or reject a cancel request.
+ * On approval, also sets campaign status = 'cancelled' and sends email.
+ * The admin still needs to call cancelCampaignOnChain() from the UI after approving.
+ */
+export async function processCancelRequest(
+  requestId: string,
+  campaignId: string,
+  action: 'approved' | 'rejected',
+  reviewerId: string,
+  adminNote?: string,
+  organizerEmail?: string,
+  campaignTitle?: string,
+): Promise<void> {
+  // Update request status
+  const { error: reqErr } = await supabase
+    .from('cancel_requests')
+    .update({
+      status: action,
+      admin_note: adminNote ?? null,
+      reviewed_by: reviewerId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', requestId);
+  if (reqErr) throw reqErr;
+
+  if (action === 'approved') {
+    // Mark campaign as cancelled in DB
+    const { error: campErr } = await supabase
+      .from('campaigns')
+      .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+      .eq('id', campaignId);
+    if (campErr) throw campErr;
+
+    // Notify organizer
+    if (organizerEmail && campaignTitle) {
+      try {
+        await supabase.functions.invoke('send-email', {
+          body: {
+            to: organizerEmail,
+            subject: `Your cancel request for "${campaignTitle}" was approved`,
+            html: `
+              <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
+                <h2 style="color:#ef4444">Campaign Cancelled</h2>
+                <p>Your request to cancel <strong>"${campaignTitle}"</strong> has been approved.</p>
+                ${adminNote ? `<blockquote style="border-left:4px solid #ef4444;padding:12px 16px;background:#fef2f2;border-radius:4px;margin:16px 0">${adminNote}</blockquote>` : ''}
+                <p>Donors will be able to claim ETH refunds on-chain. FDY tokens already earned are kept.</p>
+                <p style="color:#6b7280;font-size:14px">— The Fundy Team</p>
+              </div>
+            `,
+          },
+        });
+      } catch (emailErr) {
+        console.error('[send-email] failed:', emailErr);
+      }
+    }
+  } else {
+    // Notify organizer of rejection
+    if (organizerEmail && campaignTitle) {
+      try {
+        await supabase.functions.invoke('send-email', {
+          body: {
+            to: organizerEmail,
+            subject: `Your cancel request for "${campaignTitle}" was rejected`,
+            html: `
+              <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
+                <h2 style="color:#f59e0b">Cancel Request Rejected</h2>
+                <p>Your request to cancel <strong>"${campaignTitle}"</strong> has been reviewed and rejected.</p>
+                ${adminNote ? `<blockquote style="border-left:4px solid #f59e0b;padding:12px 16px;background:#fffbeb;border-radius:4px;margin:16px 0">${adminNote}</blockquote>` : ''}
+                <p>Your campaign remains active. If you have further concerns, please contact support.</p>
+                <p style="color:#6b7280;font-size:14px">— The Fundy Team</p>
+              </div>
+            `,
+          },
+        });
+      } catch (emailErr) {
+        console.error('[send-email] failed:', emailErr);
+      }
+    }
+  }
+}

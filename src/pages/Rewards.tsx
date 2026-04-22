@@ -251,12 +251,6 @@ export default function Rewards() {
       setOnChainNfts(nfts);
     }).catch(() => { });
   }, [isConnected, address, provider]);
-  useEffect(() => {
-    if (authLoading) return;
-    if (!isAuthenticated) return;
-    if (isConnected || isConnecting) return;
-    connect();
-  }, [authLoading, isAuthenticated, isConnected, isConnecting]);
 
   if (authLoading) {
     return <div className="min-h-[60vh] flex items-center justify-center"><Loader2 className="w-10 h-10 animate-spin text-primary" /></div>;
@@ -284,23 +278,22 @@ export default function Rewards() {
     );
   }
 
-  // Must be connected to see rewards
   if (isAuthenticated && !isConnected) {
-    return (
-      <div className="max-w-4xl mx-auto px-4 py-10">
-        <div className="text-center py-20 space-y-4">
-          <Loader2 className="w-10 h-10 animate-spin text-primary mx-auto" />
-          <p className="text-muted-foreground">Reconnecting your wallet...</p>
-          <p className="text-xs text-muted-foreground">
-            Taking too long?{' '}
-            <button onClick={connect} className="text-primary hover:underline">
-              Click here to connect manually
-            </button>
-          </p>
-        </div>
+  return (
+    <div className="max-w-4xl mx-auto px-4 py-10">
+      <div className="text-center py-20 space-y-4">
+        <Loader2 className="w-10 h-10 animate-spin text-primary mx-auto" />
+        <p className="text-muted-foreground">Reconnecting wallet...</p>
+        <p className="text-xs text-muted-foreground mt-2">
+          Taking too long?{' '}
+          <button onClick={connect} className="text-primary hover:underline">
+            Connect manually
+          </button>
+        </p>
       </div>
-    );
-  }
+    </div>
+  );
+}
 
   const pendingCount = rewards.filter(r => r.status === 'pending').length;
   const mintedCount = rewards.filter(r => r.status === 'minted').length;
