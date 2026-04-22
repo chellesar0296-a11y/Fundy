@@ -56,9 +56,6 @@ export function CampaignCard({ campaign }: CampaignCardProps) {
               {campaign.category}
             </Badge>
           </div>
-          <button className="absolute top-3 right-3 p-2 bg-white/20 backdrop-blur-md rounded-full hover:bg-white/40 transition-colors text-white">
-            <Heart className="w-4 h-4" />
-          </button>
         </div>
 
         <CardHeader className="p-5 pb-2">
@@ -118,11 +115,6 @@ export function CampaignCard({ campaign }: CampaignCardProps) {
           <Button asChild variant="outline" className="w-full rounded-xl">
             <Link to={ROUTE_PATHS.CAMPAIGN_DETAIL.replace(':id', campaign.id)}>
               {t('btn_learn_more')}
-            </Link>
-          </Button>
-          <Button asChild className="w-full rounded-xl shadow-lg shadow-primary/20">
-            <Link to={ROUTE_PATHS.CAMPAIGN_DETAIL.replace(':id', campaign.id)}>
-              {t('btn_donate')}
             </Link>
           </Button>
         </CardFooter>

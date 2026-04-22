@@ -162,7 +162,7 @@ export const useAuth = () => {
     setIsLoading(true);
     try {
       const dbUpdates: Partial<DbProfile> = {};
-      if (updates.name) dbUpdates.name = updates.name;
+      if (updates.name !== undefined) dbUpdates.name = updates.name;
       if (updates.bio !== undefined) dbUpdates.bio = updates.bio;
       if (updates.avatar !== undefined) dbUpdates.avatar_url = updates.avatar;
       const updated = await updateProfile(user.id, dbUpdates);
