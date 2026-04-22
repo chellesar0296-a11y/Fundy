@@ -98,27 +98,50 @@ export const useAuth = () => {
   }, []);
 
   const register = useCallback(async (name: string, email: string, password: string, walletAddress?: string) => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: { name },
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
+  setIsLoading(true);
+  setError(null);
+  try {
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: { 
+          name,
+          wallet_address: walletAddress ?? null,
         },
-      });
-      if (error) throw error;
+        emailRedirectTo: `${window.location.origin}/auth/callback`,
+      },
+    });
+    if (error) throw error;
+
+    return data.user;
 
       // Save wallet address immediately after signup
       if (data.user && walletAddress) {
-        await supabase
-          .from('profiles')
-          .upsert({
-            id: data.user.id,
-            wallet_address: walletAddress,
-          }, { onConflict: 'id' });
+        let saved = false;
+        for (let attempt = 0; attempt < 5; attempt++) {
+          if (attempt > 0) {
+            await new Promise((res) => setTimeout(res, attempt * 600));
+          }
+          const { error: upsertErr } = await supabase
+            .from('profiles')
+            .update({ wallet_address: walletAddress })
+            .eq('id', data.user.id);
+
+          if (!upsertErr) { saved = true; break; }
+        }
+        if (!saved) {
+          // Last resort: upsert with required fields if trigger never ran
+          await supabase
+            .from('profiles')
+            .upsert({
+              id: data.user.id,
+              name: name,
+              email: email,
+              wallet_address: walletAddress,
+              role: 'donor',
+            }, { onConflict: 'id' });
+        }
       }
 
       return data.user;
