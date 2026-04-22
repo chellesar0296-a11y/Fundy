@@ -312,7 +312,7 @@ export default function Dashboard() {
             </TabsList>
           </div>
 
-          <AnimatePresence mode="wait">
+
             <TabsContent value="overview" className="mt-0">
               <motion.div
                 key="overview"
@@ -832,7 +832,6 @@ export default function Dashboard() {
                 </Card>
               </motion.div>
             </TabsContent>
-          </AnimatePresence>
         </Tabs>
       </motion.div>
     </div>
