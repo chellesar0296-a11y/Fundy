@@ -39,7 +39,7 @@ export interface DbCampaign {
   description: string;
   short_description: string;
   category: 'Medical' | 'Education' | 'Environment' | 'Disaster' | 'Community'
-    | 'Personal' | 'Creative' | 'Technology' | 'Business' | 'Animals' | 'Sports';
+  | 'Personal' | 'Creative' | 'Technology' | 'Business' | 'Animals' | 'Sports';
   goal_amount: number;
   current_amount: number;
   donor_count: number;
@@ -239,7 +239,7 @@ export async function createCampaignUpdate(data: {
     .insert([{ ...data, created_at: new Date().toISOString() }])
     .select()
     .single();
-  
+
   if (error) throw error;
   return update;
 }
@@ -254,7 +254,7 @@ export async function createCampaignUpdate(data: {
  * @returns Public URL of the uploaded file
  */
 export async function uploadMedia(file: File, folder: string): Promise<string> {
-  const ext      = file.name.split('.').pop();
+  const ext = file.name.split('.').pop();
   const filename = `${folder}/${Date.now()}.${ext}`;
 
   const { error } = await supabase.storage
@@ -276,7 +276,7 @@ export async function getCampaignUpdates(campaignId: string) {
     .select('*')
     .eq('campaign_id', campaignId)
     .order('created_at', { ascending: false });
-  
+
   if (error) throw error;
   return data;
 }
@@ -286,7 +286,7 @@ export async function cancelCampaign(campaignId: string) {
     .from('campaigns')
     .update({ status: 'cancelled', updated_at: new Date().toISOString() })
     .eq('id', campaignId);
-  
+
   if (error) throw error;
 }
 
@@ -420,13 +420,10 @@ export async function submitReport(report: {
   reason_type: DbReport['reason_type'];
   reason_detail?: string | null;
 }) {
-  const { data, error } = await supabase
+  const { error } = await supabase
     .from('reports')
-    .insert({ ...report, status: 'pending', created_at: new Date().toISOString() })
-    .select()
-    .single();
+    .insert({ ...report, status: 'pending', created_at: new Date().toISOString() });
   if (error) throw error;
-  return data as DbReport;
 }
 
 export async function fetchReports() {
