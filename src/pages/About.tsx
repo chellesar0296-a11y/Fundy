@@ -258,31 +258,6 @@ export default function About() {
         </div>
       </section>
 
-      {/* CTA Section */}
-      <section className="py-24 bg-primary">
-        <div className="container mx-auto px-4">
-          <div className="max-w-4xl mx-auto bg-white/10 backdrop-blur-md border border-white/20 rounded-[3rem] p-12 md:p-20 text-center relative overflow-hidden">
-            {/* Background elements */}
-            <div className="absolute top-0 left-0 w-32 h-32 bg-accent/20 rounded-full blur-3xl -translate-x-1/2 -translate-y-1/2"></div>
-            <div className="absolute bottom-0 right-0 w-48 h-48 bg-secondary/20 rounded-full blur-3xl translate-x-1/2 translate-y-1/2"></div>
-            
-            <h2 className="text-3xl md:text-5xl font-extrabold text-white mb-6 relative z-10">
-              Ready to be part of the story?
-            </h2>
-            <p className="text-white/80 text-lg md:text-xl mb-10 max-w-2xl mx-auto relative z-10">
-              Whether you're starting a new initiative or supporting a neighbor, your journey toward impact begins here.
-            </p>
-            <div className="flex flex-col sm:flex-row gap-4 justify-center relative z-10">
-              <Button size="lg" className="bg-white text-primary hover:bg-white/90 text-lg px-10 h-14 rounded-full shadow-lg">
-                <Link to={ROUTE_PATHS.REGISTER}>Join the Community</Link>
-              </Button>
-              <Button variant="outline" size="lg" className="border-white text-white hover:bg-white/10 text-lg px-10 h-14 rounded-full">
-                <Link to={ROUTE_PATHS.CAMPAIGNS}>Browse Campaigns</Link>
-              </Button>
-            </div>
-          </div>
-        </div>
-      </section>
     </div>
   );
 }

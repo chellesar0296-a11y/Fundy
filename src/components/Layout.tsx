@@ -298,46 +298,18 @@ export function Layout({ children }: LayoutProps) {
             </div>
 
             <div>
-              <h4 className="font-bold mb-6">{t('nav_campaigns')}</h4>
-              <ul className="space-y-4 text-sm text-muted-foreground">
-                <li><Link to={ROUTE_PATHS.CAMPAIGNS} className="hover:text-primary transition-colors">Medical Help</Link></li>
-                <li><Link to={ROUTE_PATHS.CAMPAIGNS} className="hover:text-primary transition-colors">Education</Link></li>
-                <li><Link to={ROUTE_PATHS.CAMPAIGNS} className="hover:text-primary transition-colors">Environment</Link></li>
-                <li><Link to={ROUTE_PATHS.CAMPAIGNS} className="hover:text-primary transition-colors">Disaster Relief</Link></li>
-              </ul>
-            </div>
-
-            <div>
               <h4 className="font-bold mb-6">Company</h4>
               <ul className="space-y-4 text-sm text-muted-foreground">
                 <li><Link to={ROUTE_PATHS.ABOUT} className="hover:text-primary transition-colors">{t('nav_about')}</Link></li>
                 <li><Link to={ROUTE_PATHS.CREATE_CAMPAIGN} className="hover:text-primary transition-colors">Start a Campaign</Link></li>
-                <li><a href="#" className="hover:text-primary transition-colors">Trust & Safety</a></li>
-                <li><a href="#" className="hover:text-primary transition-colors">Contact</a></li>
               </ul>
             </div>
 
-            <div>
-              <h4 className="font-bold mb-6">Support</h4>
-              <ul className="space-y-4 text-sm text-muted-foreground">
-                <li><a href="#" className="hover:text-primary transition-colors">Help Center</a></li>
-                <li><a href="#" className="hover:text-primary transition-colors">Success Stories</a></li>
-                <li><a href="#" className="hover:text-primary transition-colors">Privacy Policy</a></li>
-                <li><a href="#" className="hover:text-primary transition-colors">Terms of Service</a></li>
-              </ul>
-            </div>
           </div>
 
           <div className="pt-8 border-t border-border flex flex-col md:flex-row items-center justify-between gap-4">
             <p className="text-sm text-muted-foreground">© 2026 Fundy. All rights reserved.</p>
-            <div className="flex items-center gap-6">
-              <a href="#" className="text-muted-foreground hover:text-primary transition-colors">
-                <Globe className="w-5 h-5" />
-              </a>
-              <a href="#" className="text-muted-foreground hover:text-primary transition-colors">
-                <Heart className="w-5 h-5" />
-              </a>
-            </div>
+
           </div>
         </div>
       </footer>
