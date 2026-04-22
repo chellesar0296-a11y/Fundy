@@ -796,7 +796,6 @@ export default function AdminDashboard() {
           <StatCard title="Total campaigns" value={stats.totalCampaigns} icon={LayoutDashboard} loading={loadingCampaigns} />
           <StatCard title="Active" value={stats.activeCampaigns} icon={TrendingUp} loading={loadingCampaigns} color="text-emerald-600" />
           <StatCard title="Users" value={stats.totalUsers} icon={Users} loading={loadingUsers} />
-          <StatCard title="Pending rewards" value={stats.pendingRewards} icon={Gift} loading={loadingRewards} color="text-amber-600" />
           <StatCard title="Pending verifications" value={stats.pendingVerifications} icon={ShieldCheck} loading={loadingVerifications} color="text-blue-600" />
           <StatCard title="Pending reports" value={stats.pendingReports} icon={Flag} loading={loadingReports} color="text-red-500" />
           <StatCard title="Cancel requests" value={stats.pendingCancelRequests} icon={Ban} loading={loadingCancelRequests} color="text-orange-500" />
@@ -810,9 +809,6 @@ export default function AdminDashboard() {
             </TabsTrigger>
             <TabsTrigger value="users" className="gap-2">
               <Users className="w-4 h-4" /> Users
-            </TabsTrigger>
-            <TabsTrigger value="rewards" className="gap-2">
-              <Gift className="w-4 h-4" /> Rewards
             </TabsTrigger>
             <TabsTrigger value="reports" className="gap-2 relative">
               <Flag className="w-4 h-4" /> Reports
