@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -89,14 +89,14 @@ export default function CampaignDetail() {
             try {
               const block = await provider.getBlock(e.blockNumber);
               if (block) date = new Date(Number(block.timestamp) * 1000);
-            } catch {}
+            } catch { }
             return {
-              address:  e.args.donor as string,
-              amount:   ethers.formatEther(e.args.amount),
+              address: e.args.donor as string,
+              amount: ethers.formatEther(e.args.amount),
               amountRm: (Number(ethers.formatEther(e.args.amount)) / 0.001).toFixed(0),
               date,
-              txHash:   e.transactionHash,
-              name:     null as string | null, // will be filled below
+              txHash: e.transactionHash,
+              name: null as string | null, // will be filled below
             };
           }),
         );
@@ -122,7 +122,7 @@ export default function CampaignDetail() {
                 d.name = nameMap[d.address.toLowerCase()] ?? null;
               });
             }
-          } catch {}
+          } catch { }
         }
 
         if (!cancelled) setOnChainDonors(filtered.reverse());
@@ -163,6 +163,39 @@ export default function CampaignDetail() {
   const progressPercent = Math.min(100, Math.floor((campaign.currentAmount / campaign.goalAmount) * 100));
   const isVerified = campaign.organizer.isVerified;
   const isOwnCampaign = !!user && user.id === campaign.organizer.id;
+  
+
+  const copyToClipboard = (text: string) => {
+    if (navigator.clipboard && window.isSecureContext) {
+      return navigator.clipboard.writeText(text);
+    }
+    const el = document.createElement('textarea');
+    el.value = text;
+    el.style.position = 'fixed';
+    el.style.opacity = '0';
+    document.body.appendChild(el);
+    el.select();
+    document.execCommand('copy');
+    document.body.removeChild(el);
+  };
+
+  const handleShare = async () => {
+  const url = window.location.href;
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: campaign.title, url });
+    } catch (err) {
+      // user cancelled — do nothing
+    }
+  } else {
+    try {
+      await copyToClipboard(url);
+      toast.success('Link copied to clipboard!');
+    } catch (err) {
+      toast.error('Failed to copy link. Please copy it manually from the address bar.');
+    }
+  }
+};
 
   const handleSubmitReport = async () => {
     setIsSubmittingReport(true);
@@ -186,11 +219,11 @@ export default function CampaignDetail() {
   // Group reward tiers by type for vertical sub-tabs
   const tiersByType = rewardTiers && rewardTiers.length > 0
     ? rewardTiers.reduce((acc: Record<string, any[]>, tier: any) => {
-        const key = tier.type ?? 'Other';
-        if (!acc[key]) acc[key] = [];
-        acc[key].push(tier);
-        return acc;
-      }, {})
+      const key = tier.type ?? 'Other';
+      if (!acc[key]) acc[key] = [];
+      acc[key].push(tier);
+      return acc;
+    }, {})
     : {};
   const tierTypeKeys = Object.keys(tiersByType);
 
@@ -461,14 +494,6 @@ export default function CampaignDetail() {
                       >
                         <Heart className="mr-2 w-5 h-5 fill-current" />
                         {t('btn_donate')}
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="lg"
-                        className="w-full h-14 text-lg font-bold"
-                      >
-                        <Share2 className="mr-2 w-5 h-5" />
-                        {t('btn_share')}
                       </Button>
                     </div>
 
