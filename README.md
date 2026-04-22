@@ -26,14 +26,15 @@ remain:
 - donate function
 - reward function
 - the all link in the footer of web app
+<<<<<<< HEAD
 - cannot donate own campaign
 - media upload in the post update in the campaign management
 - First page a little bit big the things
 
+=======
+- register button in the homa page(Ready to Start Your Own Campaign?) need to update (currently dont have register page)
+>>>>>>> 3f0d5b1934790b8867ae3c651e5c091c0012ab09
 
-can do:  
-- Full function of shipping physical reward (may not do)
-- point system and exchange peripheral product (may not do)  
 
 
 

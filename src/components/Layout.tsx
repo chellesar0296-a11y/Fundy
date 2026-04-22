@@ -273,9 +273,6 @@ export function Layout({ children }: LayoutProps) {
                   </Button>
                 </div>
               )}
-              <Button asChild size="lg" className="w-full h-14 text-lg font-bold bg-primary shadow-xl">
-                <Link to={ROUTE_PATHS.CAMPAIGNS}>{t('btn_donate')}</Link>
-              </Button>
             </div>
           </motion.div>
         )}
