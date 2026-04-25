@@ -1,13 +1,13 @@
 import { createClient } from '@supabase/supabase-js';
 
-const SUPABASE_URL = 'https://enbtaxbnlejzxuyuugla.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVuYnRheGJubGVqenh1eXV1Z2xhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0MTk0MDgsImV4cCI6MjA5MDk5NTQwOH0.rxgk10frLLCIb9vdA1ygNfB4Yca8qwf5zpjSVxBcRLQ';
+export const SUPABASE_URL = 'https://enbtaxbnlejzxuyuugla.supabase.co';
+export const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVuYnRheGJubGVqenh1eXV1Z2xhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0MTk0MDgsImV4cCI6MjA5MDk5NTQwOH0.rxgk10frLLCIb9vdA1ygNfB4Yca8qwf5zpjSVxBcRLQ';
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
-    detectSessionInUrl: true,
+    detectSessionInUrl: false,
   },
   global: {
     headers: {

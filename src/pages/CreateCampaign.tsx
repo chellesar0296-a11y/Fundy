@@ -5,7 +5,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { toast } from 'sonner';
-import { createCampaign, supabase } from '@/lib/supabase';
+import { createCampaign, supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from '@/lib/supabase';
 import { useWeb3 } from '@/context/Web3Context';
 import { useAuth } from '@/hooks/useAuth';
 import { ROUTE_PATHS } from '@/lib/index';
@@ -121,9 +121,9 @@ function TierEditor({ tier, index, onUpdate, onRemove }: {
                 <Input
                   placeholder={
                     tier.type === 'ERC721' ? 'e.g. Pioneer Supporter NFT'
-                    : tier.type === 'ERC20' ? 'e.g. FUNDY Token Reward'
-                    : tier.type === 'physical' ? 'e.g. Signed Poster, T-Shirt'
-                    : 'e.g. Early Bird Badge'
+                      : tier.type === 'ERC20' ? 'e.g. FUNDY Token Reward'
+                        : tier.type === 'physical' ? 'e.g. Signed Poster, T-Shirt'
+                          : 'e.g. Early Bird Badge'
                   }
                   value={tier.name} onChange={(e) => set('name', e.target.value)} />
               </div>
@@ -169,9 +169,9 @@ export default function CreateCampaign() {
   const [previewUrl, setPreviewUrl] = useState('');
 
   // ── On-chain reward config ────────────────────────────────
-  const [extraFdyAmount,   setExtraFdyAmount]   = useState('');
-  const [extraFdyMinRm,    setExtraFdyMinRm]    = useState('');
-  const [extraFdyBudget,   setExtraFdyBudget]   = useState('');
+  const [extraFdyAmount, setExtraFdyAmount] = useState('');
+  const [extraFdyMinRm, setExtraFdyMinRm] = useState('');
+  const [extraFdyBudget, setExtraFdyBudget] = useState('');
   const [showRewardConfig, setShowRewardConfig] = useState(false);
 
   const form = useForm<FormValues>({
@@ -198,31 +198,48 @@ export default function CreateCampaign() {
     if (!user) return;
     if (!isConnected) { toast.error('Please connect your MetaMask wallet first.'); return; }
     setIsSubmitting(true);
+
+    // fetch helper
+    const dbFetch = (path: string, method: string, body?: object) =>
+      fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          'Prefer': 'return=representation',
+        },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+
     try {
       const slug = slugify(values.title) + '-' + Date.now().toString(36);
-      const campaign = await createCampaign({
+
+      // create campaign
+      const res = await dbFetch('campaigns', 'POST', {
         title: values.title, slug,
-        description: values.description, short_description: values.short_description,
-        category: values.category, goal_amount: values.goal_amount,
+        description: values.description,
+        short_description: values.short_description,
+        category: values.category,
+        goal_amount: values.goal_amount,
         image_url: values.image_url || undefined,
         end_date: new Date(values.end_date).toISOString(),
         organizer_id: user.id,
       });
+      if (!res.ok) throw new Error('Failed to create campaign');
+      const [campaign] = await res.json();
 
-      // If offering extra FDY — check balance, buy if needed, then approve
+      // Extra FDY 
       if (extraFdyAmount && extraFdyBudget) {
         try {
           toast.info('Checking FDY balance...');
           const hasSufficientFdy = await checkFdyBalance(extraFdyBudget);
-
           if (!hasSufficientFdy) {
-            // Need to buy FDY: budget FDY / 100 = ETH needed (1 ETH = 100 FDY)
             const ethNeeded = (Number(extraFdyBudget) / 100).toFixed(6);
             toast.info(`Insufficient FDY — purchasing ${extraFdyBudget} FDY (costs ${ethNeeded} ETH)...`);
             await buyFdy(ethNeeded);
             toast.success('FDY purchased!');
           }
-
           toast.info('Step 1/2: Approving FDY budget...');
           await approveExtraFdy(extraFdyBudget);
           toast.success('FDY approved!');
@@ -232,20 +249,22 @@ export default function CreateCampaign() {
         }
       }
 
-      // Register on-chain
+      // Register into the chain
       let onChainId: number | null = null;
       try {
         toast.info(extraFdyAmount ? 'Step 2/2: Registering campaign on-chain...' : 'Confirm in MetaMask...');
-        const goalEth        = (values.goal_amount * 0.001).toFixed(6);
-        const deadlineTs     = Math.floor(new Date(values.end_date).getTime() / 1000);
-        const extraFdyWei    = extraFdyAmount || '0';
-        const extraMinEth    = extraFdyMinRm ? (Number(extraFdyMinRm) * 0.001).toFixed(6) : '0';
+        const goalEth = (values.goal_amount * 0.001).toFixed(6);
+        const deadlineTs = Math.floor(new Date(values.end_date).getTime() / 1000);
+        const extraFdyWei = extraFdyAmount || '0';
+        const extraMinEth = extraFdyMinRm ? (Number(extraFdyMinRm) * 0.001).toFixed(6) : '0';
         onChainId = await createCampaignOnChain(campaign.id, goalEth, deadlineTs, '', extraFdyWei, extraMinEth);
-        await supabase.from('campaigns').update({ on_chain_id: onChainId }).eq('id', campaign.id);
+
+        // update on_chain_id
+        await dbFetch(`campaigns?id=eq.${campaign.id}`, 'PATCH', { on_chain_id: onChainId });
         toast.success(`Campaign live on-chain! ID: #${onChainId}`);
       } catch (chainErr: any) {
-        // On-chain failed — delete Supabase record to avoid orphaned campaigns
-        await supabase.from('campaigns').delete().eq('id', campaign.id);
+        // if the update on chain is failed, delete the Supabase records
+        await dbFetch(`campaigns?id=eq.${campaign.id}`, 'DELETE');
         if (chainErr?.code === 4001) {
           toast.error('Transaction cancelled. Campaign was not created.');
         } else {
@@ -258,7 +277,9 @@ export default function CreateCampaign() {
       navigate(ROUTE_PATHS.CAMPAIGN_DETAIL.replace(':id', campaign.id));
     } catch (err: any) {
       toast.error(err.message ?? 'Failed to create campaign');
-    } finally { setIsSubmitting(false); }
+    } finally {
+      setIsSubmitting(false);
+    }
   }
   const minDate = new Date();
   minDate.setDate(minDate.getDate() + 7);
