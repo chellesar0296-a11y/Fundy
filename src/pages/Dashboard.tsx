@@ -211,11 +211,15 @@ export default function Dashboard() {
           // Try to match campaign title from supabase campaigns list
           const { data: campaignData } = await supabase
             .from('campaigns')
-            .select('on_chain_id, title');
+            .select('on_chain_id, title, status');  
 
           const chainIdToTitle: Record<number, string> = {};
+          const chainIdToStatus: Record<number, string> = {};  
           (campaignData ?? []).forEach((c: any) => {
-            if (c.on_chain_id) chainIdToTitle[Number(c.on_chain_id)] = c.title;
+            if (c.on_chain_id) {
+              chainIdToTitle[Number(c.on_chain_id)] = c.title;
+              chainIdToStatus[Number(c.on_chain_id)] = c.status;  
+            }
           });
 
           const enriched = allTxs.map(tx => ({
@@ -223,7 +227,24 @@ export default function Dashboard() {
             campaignTitle: chainIdToTitle[tx.campaignId] ?? null,
           }));
 
-          setOnChainTxs(enriched);
+          const uniqueIds = [...new Set(enriched.map((tx: any) => tx.campaignId))];
+          const withdrawnMap: Record<number, boolean> = {};
+          await Promise.all(uniqueIds.map(async (cid: any) => {
+            try {
+              const c = await contract.campaigns(cid);
+              withdrawnMap[cid] = c.withdrawn ?? false;
+            } catch {
+              withdrawnMap[cid] = false;
+            }
+          }));
+
+          setOnChainTxs(enriched.map((tx: any) => ({
+            ...tx,
+            withdrawn:
+              chainIdToStatus[tx.campaignId] === 'completed'  
+              || withdrawnMap[tx.campaignId]            
+              || false,
+          })));
           setOnChainLoading(false);
         }
 
@@ -676,10 +697,22 @@ export default function Dashboard() {
                               </span>
                             </td>
                             <td className="px-5 py-3">
-                              {tx.type === 'refunded'
-                                ? <span className="text-xs text-muted-foreground italic">Campaign cancelled</span>
-                                : <span className="text-primary font-semibold">+{Number(tx.tokens).toFixed(2)} FDY</span>
-                              }
+                              {tx.type === 'refunded' ? (
+                                <span className="text-xs text-muted-foreground italic">Campaign cancelled</span>
+                              ) : (
+                                <div className="space-y-1">
+                                  <p className="text-primary font-semibold">+{Number(tx.tokens).toFixed(2)} FDY</p>
+                                  {tx.withdrawn ? (
+                                    <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700">
+                                      ✓ Funds Released
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">
+                                      ⏳ Held in Contract
+                                    </span>
+                                  )}
+                                </div>
+                              )}
                             </td>
                             <td className="px-5 py-3">
                               <span className="font-mono text-xs text-muted-foreground" title={tx.txHash}>
