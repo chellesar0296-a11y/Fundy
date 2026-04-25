@@ -24,7 +24,7 @@ import { ROUTE_PATHS } from '@/lib/index';
 import { useLanguage } from '@/hooks/useLanguage';
 import { useAuth } from '@/hooks/useAuth';
 import { useCampaigns } from '@/hooks/useCampaigns';
-import { fetchUserDonations, fetchUserCampaigns, fetchUserRewards, DbReward } from '@/lib/supabase';
+import { supabase, fetchUserDonations, fetchUserCampaigns, fetchUserRewards, DbReward } from '@/lib/supabase';
 import { useWeb3, CROWDFUNDING_ABI, CONTRACT_ADDRESSES } from '@/context/Web3Context';
 import { ethers } from 'ethers';
 import { dbCampaignToFrontend } from '@/hooks/useCampaigns';
@@ -141,7 +141,7 @@ export default function Dashboard() {
       try {
         const contract = new ethers.Contract(CONTRACT_ADDRESSES.crowdfunding, CROWDFUNDING_ABI, provider);
 
-// My donations (as donor)
+        // My donations (as donor)
         const donorFilter = contract.filters.DonationReceived();
         const allEvents = await contract.queryFilter(donorFilter, 0, "latest");
         const myEvents = allEvents.filter((e: any) =>
@@ -161,22 +161,72 @@ export default function Dashboard() {
             };
           } catch {
             return {
-              type:       'donated',
-              txHash:     e.transactionHash,
+              type: 'donated',
+              txHash: e.transactionHash,
               campaignId: Number(e.args.campaignId),
               amount: ethers.formatEther(e.args.ethAmount),
-              amountRm:   (Number(ethers.formatEther(e.args.amount)) / 0.001).toFixed(2),
-              tokens:     '0',
-              timestamp:  null,
+              tokens: '0',
+              timestamp: null,
             };
           }
         }));
-        setOnChainTxs(txs.reverse());
+
+        const refundFilter = contract.filters.EthRefundIssued();
+        const allRefundEvents = await contract.queryFilter(refundFilter, 0, "latest");
+        const myRefundEvents = allRefundEvents.filter((e: any) =>
+          e.args.donor.toLowerCase() === address.toLowerCase()
+        );
+
+        const refundTxs = await Promise.all(myRefundEvents.map(async (e: any) => {
+          try {
+            const block = await provider.getBlock(e.blockNumber);
+            return {
+              type: 'refunded',
+              txHash: e.transactionHash,
+              campaignId: Number(e.args.campaignId),
+              amount: ethers.formatEther(e.args.amount),
+              tokens: '0',
+              timestamp: block ? new Date(Number(block.timestamp) * 1000) : null,
+            };
+          } catch {
+            return {
+              type: 'refunded',
+              txHash: e.transactionHash,
+              campaignId: Number(e.args.campaignId),
+              amount: ethers.formatEther(e.args.amount),
+              tokens: '0',
+              timestamp: null,
+            };
+          }
+        }));
+
+        // Merge and sort by timestamp (newest first)
+        const allTxs = [...txs, ...refundTxs].sort((a, b) => {
+          if (!a.timestamp) return 1;
+          if (!b.timestamp) return -1;
+          return b.timestamp.getTime() - a.timestamp.getTime();
+        });
 
         if (!cancelled) {
-          setOnChainTxs(txs.reverse());
+          // Try to match campaign title from supabase campaigns list
+          const { data: campaignData } = await supabase
+            .from('campaigns')
+            .select('on_chain_id, title');
+
+          const chainIdToTitle: Record<number, string> = {};
+          (campaignData ?? []).forEach((c: any) => {
+            if (c.on_chain_id) chainIdToTitle[Number(c.on_chain_id)] = c.title;
+          });
+
+          const enriched = allTxs.map(tx => ({
+            ...tx,
+            campaignTitle: chainIdToTitle[tx.campaignId] ?? null,
+          }));
+
+          setOnChainTxs(enriched);
           setOnChainLoading(false);
         }
+
       } catch (err) {
         if (!cancelled && attempt < 3) {
           setTimeout(() => fetchTxs(attempt + 1), 1500);
@@ -443,7 +493,7 @@ export default function Dashboard() {
                   </CardFooter>
                 </Card>
 
-              
+
               </div>
             </motion.div>
           </TabsContent>
@@ -604,17 +654,32 @@ export default function Dashboard() {
                       </thead>
                       <tbody className="divide-y">
                         {onChainTxs.map((tx) => (
-                          <tr key={tx.txHash} className="hover:bg-muted/30 transition-colors">
+                          <tr key={tx.txHash + tx.type} className={`hover:bg-muted/30 transition-colors ${tx.type === 'refunded' ? 'bg-red-50/40' : ''}`}>
                             <td className="px-5 py-3 whitespace-nowrap text-muted-foreground">
                               {tx.timestamp ? tx.timestamp.toLocaleDateString() : '—'}
                             </td>
-                            <td className="px-5 py-3 font-medium">Campaign #{tx.campaignId}</td>
-                            <td className="px-5 py-3">
-                              <span className="font-semibold">{tx.amountRm}</span>
-                              <span className="text-xs text-muted-foreground ml-1">{Number(tx.amount).toFixed(5)} ETH</span>
+                            <td className="px-5 py-3 font-medium">
+                              <p className="text-sm font-semibold">
+                                {tx.campaignTitle ?? `Campaign #${tx.campaignId}`}
+                              </p>
+                              <span className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded-full ${tx.type === 'refunded'
+                                ? 'bg-red-100 text-red-600'
+                                : 'bg-emerald-100 text-emerald-700'
+                                }`}>
+                                {tx.type === 'refunded' ? '↩ Refunded' : '↑ Donated'}
+                              </span>
                             </td>
                             <td className="px-5 py-3">
-                              <span className="text-primary font-semibold">+{Number(tx.tokens).toFixed(2)} FDY</span>
+                              <span className={`font-semibold ${tx.type === 'refunded' ? 'text-red-600' : ''}`}>
+                                {tx.type === 'refunded' ? '+ ' : '- '}
+                                {Number(tx.amount).toFixed(5)} ETH
+                              </span>
+                            </td>
+                            <td className="px-5 py-3">
+                              {tx.type === 'refunded'
+                                ? <span className="text-xs text-muted-foreground italic">Campaign cancelled</span>
+                                : <span className="text-primary font-semibold">+{Number(tx.tokens).toFixed(2)} FDY</span>
+                              }
                             </td>
                             <td className="px-5 py-3">
                               <span className="font-mono text-xs text-muted-foreground" title={tx.txHash}>
@@ -636,27 +701,55 @@ export default function Dashboard() {
                     <h3 className="font-bold text-lg flex items-center gap-2">
                       <Megaphone className="w-4 h-4 text-primary" /> Donations Received
                     </h3>
-                    <p className="text-sm text-muted-foreground">Contributions received by your campaigns.</p>
+                    <p className="text-sm text-muted-foreground">Contributions received by your active and completed campaigns.</p>
                   </div>
                   <div className="divide-y">
-                    {userCampaigns.filter(c => c.donorCount > 0).length === 0 ? (
+                    {/* Active/completed campaigns with donations */}
+                    {userCampaigns
+                      .filter(c => c.donorCount > 0 && c.status !== 'cancelled' && c.currentAmount > 0)
+                      .length === 0 ? (
                       <div className="text-center py-10 text-muted-foreground">
                         <p className="text-sm">No donations received yet on your campaigns.</p>
                       </div>
                     ) : (
-                      userCampaigns.filter(c => c.donorCount > 0).map((campaign) => (
-                        <div key={campaign.id} className="p-4 flex items-center justify-between gap-4">
+                      userCampaigns
+                        .filter(c => c.donorCount > 0 && c.status !== 'cancelled' && c.currentAmount > 0)
+                        .map((campaign) => (
+                          <div key={campaign.id} className="p-4 flex items-center justify-between gap-4">
+                            <div className="min-w-0">
+                              <p className="font-semibold text-sm line-clamp-1">{campaign.title}</p>
+                              <p className="text-xs text-muted-foreground mt-0.5">{campaign.donorCount} donors</p>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <p className="font-bold text-emerald-600">RM{campaign.currentAmount.toLocaleString()}</p>
+                              <p className="text-xs text-muted-foreground">of RM{campaign.goalAmount.toLocaleString()}</p>
+                            </div>
+                          </div>
+                        ))
+                    )
+                    }
+
+                    {/* Cancelled campaigns shown separately, transparently */}
+                    {userCampaigns
+                      .filter(c => c.status === 'cancelled' && c.donorCount > 0)
+                      .map((campaign) => (
+                        <div key={campaign.id} className="p-4 flex items-center justify-between gap-4 opacity-50">
                           <div className="min-w-0">
                             <p className="font-semibold text-sm line-clamp-1">{campaign.title}</p>
-                            <p className="text-xs text-muted-foreground mt-0.5">{campaign.donorCount} donors</p>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-600">
+                                Cancelled — Refunded
+                              </span>
+                              <p className="text-xs text-muted-foreground">{campaign.donorCount} donors refunded</p>
+                            </div>
                           </div>
                           <div className="text-right shrink-0">
-                            <p className="font-bold text-emerald-600">RM{campaign.currentAmount.toLocaleString()}</p>
-                            <p className="text-xs text-muted-foreground">of RM{campaign.goalAmount.toLocaleString()}</p>
+                            <p className="font-bold text-muted-foreground">RM0</p>
+                            <p className="text-xs text-muted-foreground line-through">RM{campaign.goalAmount.toLocaleString()} goal</p>
                           </div>
                         </div>
                       ))
-                    )}
+                    }
                   </div>
                 </div>
               )}
