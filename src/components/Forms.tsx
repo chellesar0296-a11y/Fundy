@@ -41,7 +41,7 @@ type DonationValues = z.infer<typeof donationSchema>;
 export function DonationForm({ campaign, onClose }: { campaign: Campaign; onClose?: () => void }) {
   const { t } = useLanguage();
   const { user } = useAuth();
-  const { isConnected, address, connect, donateEth, donateWithTokens, fdyBalance, refreshBalance } = useWeb3();
+  const { isConnected, address, connect, donateEth, donateWithFdy, fdyBalance, refreshBalance } = useWeb3();
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedPreset, setSelectedPreset] = useState<number | null>(null);
@@ -89,7 +89,7 @@ export function DonationForm({ campaign, onClose }: { campaign: Campaign; onClos
           setIsSubmitting(false);
           return;
         }
-        receipt = await donateWithTokens(onChainId, fdyAmount);
+        receipt = await donateWithFdy(onChainId, fdyAmount);
       }
 
       // Save to Supabase

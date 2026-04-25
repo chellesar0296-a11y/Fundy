@@ -20,7 +20,10 @@ interface LayoutProps {
   children: React.ReactNode;
 }
 
+import { useAutoRefund } from '@/hooks/useAutoRefund';
+
 export function Layout({ children }: LayoutProps) {
+  useAutoRefund();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
   const [authModal, setAuthModal] = useState<{ open: boolean; tab: 'login' | 'register' }>({

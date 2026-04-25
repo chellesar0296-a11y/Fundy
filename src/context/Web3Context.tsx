@@ -3,8 +3,8 @@ import { ethers } from 'ethers';
 import { supabase } from '@/lib/supabase';
 
 export const CONTRACT_ADDRESSES = {
-  crowdfunding: '0x91BA5E10fe99ff559504fB14B7f0c3cB6a04A4eA',
-  token:        '0xd518e290D3DE2E3DD01BBbfB89e8b78120500712',
+  crowdfunding: '0x107DEfA6382C4de25a771891147976B6283f1Bed',
+  token:        '0x68f302f89e1eAFde30c4e17e6465cF6e25EC1A21',
 };
 
 export const CROWDFUNDING_ABI = [
@@ -17,6 +17,7 @@ export const CROWDFUNDING_ABI = [
   'function totalRaised(uint256) view returns (uint256)',
   'function isGoalReached(uint256) view returns (bool)',
   'function isRefundable(uint256) view returns (bool)',
+  'function admins(address) view returns (bool)', 
   // Write
   'function createCampaign(string, uint256, uint256, string, uint256, uint256) returns (uint256)',
   'function donate(uint256) payable',
@@ -25,6 +26,9 @@ export const CROWDFUNDING_ABI = [
   'function claimRefund(uint256)',
   'function cancelCampaign(uint256)',
   'function buyFdy() payable',
+  'function triggerExpiredRefunds(uint256)',
+  'function addAdmin(address)',
+  'function removeAdmin(address)',
   // Events
   'event CampaignCreated(uint256 indexed campaignId, string supabaseId, address organizer, uint256 goal, uint256 deadline)',
   'event DonationReceived(uint256 indexed campaignId, address indexed donor, uint256 ethAmount, uint256 fdyMinted)',
@@ -34,6 +38,7 @@ export const CROWDFUNDING_ABI = [
   'event EthRefundIssued(uint256 indexed campaignId, address indexed donor, uint256 amount)',
   'event FdyRefundIssued(uint256 indexed campaignId, address indexed donor, uint256 fdyAmount)',
   'event CampaignCancelled(uint256 indexed campaignId)',
+  
 ];
 
 export const TOKEN_ABI = [
@@ -65,6 +70,8 @@ interface Web3ContextType {
   connect:       () => Promise<void>;
   disconnect:    () => void;
   refreshBalance: () => Promise<void>;
+  addAdmin:    (address: string) => Promise<void>;
+  removeAdmin: (address: string) => Promise<void>;
   createCampaignOnChain: (
     supabaseId: string, goalEth: string, deadlineTs: number,
     nftUri: string, extraFdyAmount: string, extraFdyMinDonate: string
@@ -79,6 +86,7 @@ interface Web3ContextType {
   approveExtraFdy:    (amount: string) => Promise<void>;
   buyFdy:             (ethAmount: string) => Promise<void>;
   checkFdyBalance:    (requiredFdy: string) => Promise<boolean>;
+
 }
 
 const Web3Context = createContext<Web3ContextType | null>(null);
@@ -295,7 +303,8 @@ export function Web3Provider({
   const cancelCampaignOnChain = useCallback(async (id: number) => (await (await cf(true).cancelCampaign(id)).wait()), [cf]);
   const getCampaignOnChain    = useCallback(async (id: number) => await cf().getCampaign(id), [cf]);
   const getDonationAmount     = useCallback(async (id: number, donor: string) => ethers.formatEther(await cf().getEthDonation(id, donor)), [cf]);
-
+  const addAdmin    = useCallback(async (addr: string) => { const tx = await cf(true).addAdmin(addr); await tx.wait(); }, [cf]);
+  const removeAdmin = useCallback(async (addr: string) => { const tx = await cf(true).removeAdmin(addr); await tx.wait(); }, [cf]);
   return (
     <Web3Context.Provider value={{
       provider, signer, address, chainId, fdyBalance, ethBalance,
@@ -304,7 +313,7 @@ export function Web3Provider({
       createCampaignOnChain, donateEth, donateWithFdy,
       withdrawFunds, claimRefund, cancelCampaignOnChain,
       getCampaignOnChain, getDonationAmount, approveExtraFdy,
-      buyFdy, checkFdyBalance,
+      buyFdy, checkFdyBalance, addAdmin, removeAdmin,
     }}>
       {children}
     </Web3Context.Provider>
