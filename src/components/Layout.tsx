@@ -26,15 +26,20 @@ export function Layout({ children }: LayoutProps) {
   const [authModal, setAuthModal] = useState<{ open: boolean; tab: 'login' | 'register' }>({
     open: false, tab: 'login',
   });
-  
+
   const { t, setLanguage, currentLanguage, languages } = useLanguage();
   const { user, isAuthenticated, logout } = useAuth();
   const { disconnect } = useWeb3();
   const location = useLocation();
-  const handleLogout = useCallback(() => {
-  disconnect();
-  logout();
-}, [disconnect, logout]);
+  const handleLogout = useCallback(async () => {
+    try {
+      await disconnect();
+    } catch (err) {
+      console.warn('Web3 disconnect error:', err);
+    } finally {
+      logout();
+    }
+  }, [disconnect, logout]);
 
   useEffect(() => {
     const handleScroll = () => setIsScrolled(window.scrollY > 20);
@@ -79,11 +84,10 @@ export function Layout({ children }: LayoutProps) {
 
       {/* Header */}
       <header
-        className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
-          isScrolled
+        className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${isScrolled
             ? 'bg-background/80 backdrop-blur-lg border-b border-border py-3'
             : 'bg-transparent py-5'
-        }`}
+          }`}
       >
         <div className="container mx-auto px-4 flex items-center justify-between">
           {/* Logo */}
@@ -103,8 +107,7 @@ export function Layout({ children }: LayoutProps) {
                 key={link.path}
                 to={link.path}
                 className={({ isActive }) =>
-                  `text-sm font-semibold transition-colors hover:text-primary ${
-                    isActive ? 'text-primary' : 'text-muted-foreground'
+                  `text-sm font-semibold transition-colors hover:text-primary ${isActive ? 'text-primary' : 'text-muted-foreground'
                   }`
                 }
               >
@@ -232,8 +235,7 @@ export function Layout({ children }: LayoutProps) {
                   key={link.path}
                   to={link.path}
                   className={({ isActive }) =>
-                    `text-2xl font-bold flex items-center gap-4 transition-colors ${
-                      isActive ? 'text-primary' : 'text-foreground'
+                    `text-2xl font-bold flex items-center gap-4 transition-colors ${isActive ? 'text-primary' : 'text-foreground'
                     }`
                   }
                 >

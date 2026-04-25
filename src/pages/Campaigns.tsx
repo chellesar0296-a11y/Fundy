@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useCampaigns, dbCampaignToFrontend } from '@/hooks/useCampaigns';
-import { supabase } from '@/lib/supabase';
+import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from '@/lib/supabase';
 import { Search, Filter, Loader2, CheckCircle2, Flame } from 'lucide-react';
 import { CampaignCard } from '@/components/Cards';
 import { useLanguage } from '@/hooks/useLanguage';
@@ -40,15 +40,17 @@ export default function Campaigns() {
   useEffect(() => {
     if (statusTab === 'completed' && completedCampaigns.length === 0) {
       setCompletedLoading(true);
-      supabase
-        .from('campaigns')
-        .select('*, profiles(*)')
-        .eq('status', 'completed')
-        .order('created_at', { ascending: false })
-        .then(({ data }) => {
-          if (data) setCompletedCampaigns(data.map(dbCampaignToFrontend));
+      fetch(`${SUPABASE_URL}/rest/v1/campaigns?select=*,profiles(*)&status=eq.completed&order=created_at.desc`, {
+        headers: {
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        },
+      })
+        .then(res => res.json())
+        .then(data => {
+          if (Array.isArray(data)) setCompletedCampaigns(data.map(dbCampaignToFrontend));
         })
-        .catch(() => {})
+        .catch(() => { })
         .finally(() => setCompletedLoading(false));
     }
   }, [statusTab]);
@@ -91,21 +93,19 @@ export default function Campaigns() {
           <div className="flex items-center gap-2">
             <button
               onClick={() => setStatusTab('active')}
-              className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-sm font-semibold transition-all ${
-                statusTab === 'active'
+              className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-sm font-semibold transition-all ${statusTab === 'active'
                   ? 'bg-primary text-primary-foreground shadow-md shadow-primary/25'
                   : 'bg-secondary text-secondary-foreground hover:bg-accent'
-              }`}
+                }`}
             >
               <Flame className="w-3.5 h-3.5" /> Active
             </button>
             <button
               onClick={() => setStatusTab('completed')}
-              className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-sm font-semibold transition-all ${
-                statusTab === 'completed'
+              className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-sm font-semibold transition-all ${statusTab === 'completed'
                   ? 'bg-primary text-primary-foreground shadow-md shadow-primary/25'
                   : 'bg-secondary text-secondary-foreground hover:bg-accent'
-              }`}
+                }`}
             >
               <CheckCircle2 className="w-3.5 h-3.5" /> Past / Completed
             </button>
@@ -127,11 +127,10 @@ export default function Campaigns() {
             <div className="flex items-center gap-2 overflow-x-auto no-scrollbar w-full">
               <button
                 onClick={() => setActiveCategory('All')}
-                className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all whitespace-nowrap ${
-                  activeCategory === 'All'
+                className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all whitespace-nowrap ${activeCategory === 'All'
                     ? 'bg-primary text-primary-foreground'
                     : 'bg-secondary text-secondary-foreground hover:bg-accent'
-                }`}
+                  }`}
               >
                 All
               </button>
@@ -139,11 +138,10 @@ export default function Campaigns() {
                 <button
                   key={cat}
                   onClick={() => setActiveCategory(cat)}
-                  className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all whitespace-nowrap ${
-                    activeCategory === cat
+                  className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all whitespace-nowrap ${activeCategory === cat
                       ? 'bg-primary text-primary-foreground'
                       : 'bg-secondary text-secondary-foreground hover:bg-accent'
-                  }`}
+                    }`}
                 >
                   {CATEGORY_EMOJI[cat]} {cat}
                 </button>

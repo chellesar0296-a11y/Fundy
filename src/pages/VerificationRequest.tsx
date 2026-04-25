@@ -17,6 +17,8 @@ import {
   submitVerificationRequest,
   fetchUserVerificationRequest,
   DbVerificationRequest,
+  SUPABASE_URL,
+  SUPABASE_ANON_KEY,
 } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -107,16 +109,29 @@ export default function VerificationRequest() {
     }
     setIsSubmitting(true);
     try {
-      const req = await submitVerificationRequest({
-        user_id: user.id,
-        full_name: fullName.trim(),
-        id_type: idType,
-        id_number: idNumber.trim(),
-        document_url: documentUrl.trim() || null,
-        selfie_url: selfieUrl.trim() || null,
-        notes: notes.trim() || null,
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/verification_requests`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          'Prefer': 'return=representation',
+        },
+        body: JSON.stringify({
+          user_id: user.id,
+          full_name: fullName.trim(),
+          id_type: idType,
+          id_number: idNumber.trim(),
+          document_url: documentUrl.trim() || null,
+          selfie_url: selfieUrl.trim() || null,
+          notes: notes.trim() || null,
+          status: 'pending',
+          created_at: new Date().toISOString(),
+        }),
       });
-      setExistingRequest(req);
+      if (!res.ok) throw new Error('Failed to submit request');
+      const data = await res.json();
+      setExistingRequest(data[0]);
       toast.success('Verification request submitted! We will review it within 1–3 business days.');
     } catch (err: any) {
       toast.error(err.message ?? 'Failed to submit request. Please try again.');
