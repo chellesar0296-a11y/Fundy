@@ -89,7 +89,7 @@ function TierEditor({ tier, index, onUpdate, onRemove }: {
             <div className="px-5 pb-5 pt-2 space-y-4 border-t border-border bg-muted/10">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
-                  <Label className="text-xs">Minimum donation (USD)</Label>
+                  <Label className="text-xs">Minimum donation (RM)</Label>
                   <div className="relative">
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-mono text-sm">RM</span>
                     <Input type="number" min={1} className="pl-7 font-mono"
@@ -394,7 +394,7 @@ export default function CreateCampaign() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   <FormField control={form.control} name="goal_amount" render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Goal amount (USD)</FormLabel>
+                      <FormLabel>Goal amount (RM)</FormLabel>
                       <FormControl>
                         <div className="relative">
                           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-mono font-bold">RM</span>

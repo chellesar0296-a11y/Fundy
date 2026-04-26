@@ -66,7 +66,7 @@ export default function CampaignDetail() {
 
   // Fetch on-chain donors — retry up to 3 times, look up Supabase names
   useEffect(() => {
-    if (!campaign?.onChainId || !provider) return;
+    if (!provider || !campaign?.id) return;
 
     let cancelled = false;
     const fetchDonors = async (attempt = 0) => {
@@ -76,57 +76,92 @@ export default function CampaignDetail() {
           CROWDFUNDING_ABI,
           provider,
         );
-        const filter = contract.filters.DonationReceived(campaign.onChainId);
-        const events = await contract.queryFilter(filter, 0, 'latest');
+        
+        // Step 1: Find which on-chain campaignId matches this supabaseId
+        const campaignCount = await contract.campaignCount();
+        
+        let onChainId: number | null = null;
+        
+        for (let i = 1; i <= campaignCount; i++) {
+          try {
+            const c = await contract.getCampaign(i);
+            if (c.supabaseId === campaign.id) {
+              onChainId = i;
+              break;
+            }
+          } catch {
+            continue;
+          }
+        }
+        
+        if (!onChainId) {
+          if (!cancelled) setOnChainDonors([]);
+          return;
+        }
+        
+        // Step 2: Get donors using getDonors
+        const donorsList = await contract.getDonors(onChainId);
+        
         if (cancelled) return;
-
-        const seen = new Set<string>();
+        
+        // Get each donor's ETH amount
         const donors = await Promise.all(
-          events.map(async (e: any) => {
-            if (seen.has(e.args.donor)) return null;
-            seen.add(e.args.donor);
-            let date: Date | null = null;
-            try {
-              const block = await provider.getBlock(e.blockNumber);
-              if (block) date = new Date(Number(block.timestamp) * 1000);
-            } catch {}
+          donorsList.map(async (donor: string) => {
+            const amount = await contract.getEthDonation(onChainId, donor);
             return {
-              address:  e.args.donor as string,
-              amount:   ethers.formatEther(e.args.amount),
-              amountRm: (Number(ethers.formatEther(e.args.amount)) / 0.001).toFixed(0),
-              date,
-              txHash:   e.transactionHash,
-              name:     null as string | null, // will be filled below
+              address: donor,
+              amount: ethers.formatEther(amount),
+              amountRm: (Number(ethers.formatEther(amount)) / 0.001).toFixed(0),
+              date: null,
+              txHash: '',
+              name: null as string | null,
             };
-          }),
+          })
         );
-
-        const filtered = donors.filter(Boolean) as any[];
-
-        // Look up Supabase usernames for wallets that are bound
+        
+        // Filter out zero donations and sort by amount
+        const filtered = donors.filter(d => Number(d.amount) > 0);
+        filtered.sort((a, b) => Number(b.amount) - Number(a.amount));
+        
+        // Look up names from Supabase profiles by wallet_address
         if (filtered.length > 0) {
           try {
             const { supabase } = await import('@/lib/supabase');
-            const addresses = filtered.map(d => d.address.toLowerCase());
-            const { data } = await supabase
+            const addresses = filtered.map(d => d.address);
+            console.log('Querying addresses:', addresses); 
+            
+            const { data, error } = await supabase
               .from('profiles')
               .select('name, wallet_address')
               .in('wallet_address', addresses);
-
-            if (data) {
+            
+            console.log('Query result:', data, error); 
+            
+            if (data && data.length > 0) {
               const nameMap: Record<string, string> = {};
               data.forEach((p: any) => {
-                if (p.wallet_address) nameMap[p.wallet_address.toLowerCase()] = p.name;
+                if (p.wallet_address) {
+                  nameMap[p.wallet_address] = p.name;
+                  console.log(`Mapped: ${p.wallet_address} -> ${p.name}`); 
+                }
               });
+              
               filtered.forEach(d => {
-                d.name = nameMap[d.address.toLowerCase()] ?? null;
+                const matchedName = nameMap[d.address];
+                d.name = matchedName ?? null;
+                console.log(`Donor ${d.address}: matched name = ${matchedName}`); 
               });
+            } else {
+              console.log('No profiles found for addresses');
             }
-          } catch {}
+          } catch (err) {
+            console.error('Failed to fetch profile names:', err);
+          }
         }
-
-        if (!cancelled) setOnChainDonors(filtered.reverse());
+        
+        if (!cancelled) setOnChainDonors(filtered);
       } catch (err) {
+        console.error('Failed to fetch donors:', err);
         if (!cancelled && attempt < 3) {
           setTimeout(() => fetchDonors(attempt + 1), 1500);
         }
@@ -135,7 +170,7 @@ export default function CampaignDetail() {
 
     fetchDonors();
     return () => { cancelled = true; };
-  }, [campaign?.onChainId, provider]);
+  }, [campaign?.id, provider]);
 
   if (isLoading) {
     return (
@@ -440,6 +475,16 @@ export default function CampaignDetail() {
                         variant="outline"
                         size="lg"
                         className="w-full h-14 text-lg font-bold"
+                        onClick={() => {
+                          const url = window.location.href;
+                          const input = document.createElement('input');
+                          input.value = url;
+                          document.body.appendChild(input);
+                          input.select();
+                          document.execCommand('copy');
+                          document.body.removeChild(input);
+                          toast.success('Link copied!');
+                        }}
                       >
                         <Share2 className="mr-2 w-5 h-5" />
                         {t('btn_share')}

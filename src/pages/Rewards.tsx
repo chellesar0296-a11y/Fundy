@@ -21,6 +21,7 @@ interface FdyTx {
   type: TxType;
   fdyAmount: string;    // formatted FDY
   campaignId: string;
+  campaignName?: string;
   txHash: string;
   blockNumber: number;
   date: Date | null;
@@ -38,7 +39,7 @@ const ETH_TO_RM = 1000;
 
 // ── FDY History Hook ──────────────────────────────────────────
 function useFdyHistory(address: string | null, provider: ethers.BrowserProvider | null) {
-  const [txs, setTxs]       = useState<FdyTx[]>([]);
+  const [txs, setTxs] = useState<FdyTx[]>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -50,14 +51,14 @@ function useFdyHistory(address: string | null, provider: ethers.BrowserProvider 
     (async () => {
       try {
         const contract = new ethers.Contract(CONTRACT_ADDRESSES.crowdfunding, CROWDFUNDING_ABI, provider);
-        const iface    = new ethers.Interface(CROWDFUNDING_ABI);
+        const iface = new ethers.Interface(CROWDFUNDING_ABI);
 
         // Fetch all relevant events in parallel
         const [donationEvents, extraEvents, fdyDonationEvents, refundEvents] = await Promise.all([
           contract.queryFilter(contract.filters.DonationReceived(null, address), 0, 'latest'),
-          contract.queryFilter(contract.filters.ExtraFdyAwarded(null, address),  0, 'latest'),
-          contract.queryFilter(contract.filters.FdyDonation(null, address),      0, 'latest'),
-          contract.queryFilter(contract.filters.FdyRefundIssued(null, address),  0, 'latest'),
+          contract.queryFilter(contract.filters.ExtraFdyAwarded(null, address), 0, 'latest'),
+          contract.queryFilter(contract.filters.FdyDonation(null, address), 0, 'latest'),
+          contract.queryFilter(contract.filters.FdyRefundIssued(null, address), 0, 'latest'),
         ]);
 
         if (cancelled) return;
@@ -75,8 +76,8 @@ function useFdyHistory(address: string | null, provider: ethers.BrowserProvider 
           return dateCache[blockNumber];
         };
 
-        // Parse all events
-        const raw: FdyTx[] = [];
+        // Parse all events (store campaignId as number for later lookup)
+        const raw: (Omit<FdyTx, 'campaignName'> & { campaignIdNum: number })[] = [];
 
         for (const e of donationEvents) {
           try {
@@ -86,6 +87,7 @@ function useFdyHistory(address: string | null, provider: ethers.BrowserProvider 
               type: 'earned_donation',
               fdyAmount: ethers.formatEther(p.args.fdyMinted),
               campaignId: p.args.campaignId.toString(),
+              campaignIdNum: Number(p.args.campaignId),
               txHash: e.transactionHash,
               blockNumber: e.blockNumber,
               date: null,
@@ -101,6 +103,7 @@ function useFdyHistory(address: string | null, provider: ethers.BrowserProvider 
               type: 'earned_extra',
               fdyAmount: ethers.formatEther(p.args.fdyAmount),
               campaignId: p.args.campaignId.toString(),
+              campaignIdNum: Number(p.args.campaignId),
               txHash: e.transactionHash,
               blockNumber: e.blockNumber,
               date: null,
@@ -116,6 +119,7 @@ function useFdyHistory(address: string | null, provider: ethers.BrowserProvider 
               type: 'spent_donation',
               fdyAmount: ethers.formatEther(p.args.fdyBurned),
               campaignId: p.args.campaignId.toString(),
+              campaignIdNum: Number(p.args.campaignId),
               txHash: e.transactionHash,
               blockNumber: e.blockNumber,
               date: null,
@@ -131,6 +135,7 @@ function useFdyHistory(address: string | null, provider: ethers.BrowserProvider 
               type: 'earned_refund',
               fdyAmount: ethers.formatEther(p.args.fdyAmount),
               campaignId: p.args.campaignId.toString(),
+              campaignIdNum: Number(p.args.campaignId),
               txHash: e.transactionHash,
               blockNumber: e.blockNumber,
               date: null,
@@ -138,10 +143,45 @@ function useFdyHistory(address: string | null, provider: ethers.BrowserProvider 
           } catch {}
         }
 
-        // Sort by block descending, then fetch dates
-        raw.sort((a, b) => b.blockNumber - a.blockNumber);
+        if (cancelled) return;
+
+        const uniqueIds = [...new Set(raw.map(tx => tx.campaignIdNum))];
+        let nameMap: Record<number, string> = {};
+        
+        try {
+          const { supabase } = await import('@/lib/supabase');
+          const { data } = await supabase
+            .from('campaigns')
+            .select('on_chain_id, title')
+            .in('on_chain_id', uniqueIds);
+
+          if (data) {
+            nameMap = data.reduce((acc, c) => {
+              acc[Number(c.on_chain_id)] = c.title;
+              return acc;
+            }, {} as Record<number, string>);
+          }
+        } catch (err) {
+          console.warn('Failed to fetch campaign names', err);
+        }
+
+        const withNames = raw.map(tx => ({
+          ...tx,
+          campaignName: nameMap[tx.campaignIdNum] || `Campaign #${tx.campaignId}`,
+        }));
+
+        withNames.sort((a, b) => b.blockNumber - a.blockNumber);
+        
         const dated = await Promise.all(
-          raw.map(async tx => ({ ...tx, date: await getDate(tx.blockNumber) }))
+          withNames.map(async tx => ({
+            type: tx.type,
+            fdyAmount: tx.fdyAmount,
+            campaignId: tx.campaignId,
+            campaignName: tx.campaignName,
+            txHash: tx.txHash,
+            blockNumber: tx.blockNumber,
+            date: await getDate(tx.blockNumber),
+          }))
         );
 
         if (!cancelled) setTxs(dated);
@@ -334,13 +374,13 @@ export default function Rewards() {
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold">{meta.label}</p>
                         <p className="text-xs text-muted-foreground">
-                          Campaign #{tx.campaignId}
-                          {tx.date && (
-                            <span className="ml-2">
-                              · {tx.date.toLocaleDateString('en-MY', { day: 'numeric', month: 'short', year: 'numeric' })}
-                            </span>
-                          )}
-                        </p>
+                        {tx.campaignName || `Campaign #${tx.campaignId}`}
+                        {tx.date && (
+                          <span className="ml-2">
+                            · {tx.date.toLocaleDateString('en-MY', { day: 'numeric', month: 'short', year: 'numeric' })}
+                          </span>
+                        )}
+                      </p>
                       </div>
 
                       {/* Amount */}
