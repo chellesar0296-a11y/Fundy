@@ -83,6 +83,7 @@ export function DonationForm({ campaign, onClose }: { campaign: Campaign; onClos
       if (payMethod === 'eth') {
         receipt = await donateEth(onChainId, amountEth);
       } else {
+        toast.info('Using FDY helps this campaign reach its goal faster. FDY will be burned.');
         const fdyAmount = (Number(amountEth) * 100).toFixed(2);
         if (Number(fdyBalance) < Number(fdyAmount)) {
           toast.error(`Insufficient FDY. You have ${Number(fdyBalance).toFixed(2)} FDY, need ${fdyAmount} FDY.`);
@@ -202,6 +203,9 @@ export function DonationForm({ campaign, onClose }: { campaign: Campaign; onClos
             <span className="text-[10px] text-muted-foreground ml-1">({Number(fdyBalance).toFixed(0)})</span>
           </TabsTrigger>
         </TabsList>
+        <p className="text-[10px] text-muted-foreground text-center mt-2">
+          {payMethod === 'fdy' ? '✨ Using FDY helps campaign reach goal · FDY will be burned' : '💎 1 RM = 0.001 ETH'}
+        </p>
       </Tabs>
 
       <Form {...form}>
