@@ -34,8 +34,7 @@ const TX_META: Record<TxType, { label: string; sign: '+' | '-'; color: string; b
   spent_donation:  { label: 'Donated with FDY', sign: '-', color: 'text-rose-600',    bg: 'bg-rose-50',     icon: ArrowUpRight   },
 };
 
-// ETH ↔ RM: 1 ETH = 1000 RM  (same as rest of app)
-const ETH_TO_RM = 1000;
+
 
 // ── FDY History Hook ──────────────────────────────────────────
 function useFdyHistory(address: string | null, provider: ethers.BrowserProvider | null) {
@@ -251,7 +250,7 @@ export default function Rewards() {
   // ── Derived stats ───────────────────────────────────────────
   const fdyNum      = Number(fdyBalance);
   const ethNum      = Number(ethBalance);
-  const ethInRm     = (ethNum * ETH_TO_RM).toFixed(2);
+
 
   const totalEarned = txs
     .filter(t => t.type !== 'spent_donation')
@@ -297,9 +296,6 @@ export default function Rewards() {
                   <span className="text-lg font-semibold ml-1 text-muted-foreground">ETH</span>
                 </p>
               </div>
-              <p className="text-xs text-muted-foreground mt-2">
-                ≈ <span className="font-semibold text-foreground">RM{Number(ethInRm).toLocaleString()}</span>
-              </p>
             </CardContent>
           </Card>
         </div>
