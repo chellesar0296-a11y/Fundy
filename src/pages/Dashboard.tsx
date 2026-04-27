@@ -211,14 +211,14 @@ export default function Dashboard() {
           // Try to match campaign title from supabase campaigns list
           const { data: campaignData } = await supabase
             .from('campaigns')
-            .select('on_chain_id, title, status');  
+            .select('on_chain_id, title, status');
 
           const chainIdToTitle: Record<number, string> = {};
-          const chainIdToStatus: Record<number, string> = {};  
+          const chainIdToStatus: Record<number, string> = {};
           (campaignData ?? []).forEach((c: any) => {
             if (c.on_chain_id) {
               chainIdToTitle[Number(c.on_chain_id)] = c.title;
-              chainIdToStatus[Number(c.on_chain_id)] = c.status;  
+              chainIdToStatus[Number(c.on_chain_id)] = c.status;
             }
           });
 
@@ -241,8 +241,8 @@ export default function Dashboard() {
           setOnChainTxs(enriched.map((tx: any) => ({
             ...tx,
             withdrawn:
-              chainIdToStatus[tx.campaignId] === 'completed'  
-              || withdrawnMap[tx.campaignId]            
+              chainIdToStatus[tx.campaignId] === 'completed'
+              || withdrawnMap[tx.campaignId]
               || false,
           })));
           setOnChainLoading(false);
@@ -361,7 +361,7 @@ export default function Dashboard() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
           <StatsCard
             title={t('dashboard_total_donated')}
-            value={`RM${totalDonated.toLocaleString()}`}
+            value={`⟠ ${totalDonated.toLocaleString()}`}
             description="Thank you for your generosity"
           />
           <StatsCard
@@ -443,7 +443,7 @@ export default function Dashboard() {
                           </div>
                         </div>
                         <div className="text-right">
-                          <p className="font-bold">+RM{donation.amount}</p>
+                          <p className="font-bold">+⟠ {donation.amount}</p>
                           <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${donation.status === 'Completed' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
                             {donation.status}
                           </span>
@@ -581,12 +581,12 @@ export default function Dashboard() {
                           </div>
                           <div className="space-y-1">
                             <div className="flex justify-between text-xs font-medium">
-                              <span>RM{campaign.currentAmount.toLocaleString()} raised</span>
+                              <span>⟠ {campaign.currentAmount.toLocaleString()} raised</span>
                               <span className="text-muted-foreground">{pct}%</span>
                             </div>
                             <Progress value={pct} className="h-1.5" />
                             <div className="flex justify-between text-[10px] text-muted-foreground pt-0.5">
-                              <span>Goal: RM{campaign.goalAmount.toLocaleString()}</span>
+                              <span>Goal: ⟠ {campaign.goalAmount.toLocaleString()}</span>
                               <span className="flex items-center gap-1"><Clock className="w-2.5 h-2.5" />{daysLeft}d left</span>
                             </div>
                           </div>
@@ -754,8 +754,8 @@ export default function Dashboard() {
                               <p className="text-xs text-muted-foreground mt-0.5">{campaign.donorCount} donors</p>
                             </div>
                             <div className="text-right shrink-0">
-                              <p className="font-bold text-emerald-600">RM{campaign.currentAmount.toLocaleString()}</p>
-                              <p className="text-xs text-muted-foreground">of RM{campaign.goalAmount.toLocaleString()}</p>
+                              <p className="font-bold text-emerald-600">⟠ {campaign.currentAmount.toLocaleString()}</p>
+                              <p className="text-xs text-muted-foreground">of ⟠ {campaign.goalAmount.toLocaleString()}</p>
                             </div>
                           </div>
                         ))
@@ -777,8 +777,8 @@ export default function Dashboard() {
                             </div>
                           </div>
                           <div className="text-right shrink-0">
-                            <p className="font-bold text-muted-foreground">RM0</p>
-                            <p className="text-xs text-muted-foreground line-through">RM{campaign.goalAmount.toLocaleString()} goal</p>
+                            <p className="font-bold text-muted-foreground">⟠ 0</p>
+                            <p className="text-xs text-muted-foreground line-through">⟠ {campaign.goalAmount.toLocaleString()} goal</p>
                           </div>
                         </div>
                       ))

@@ -47,7 +47,7 @@ export function ProgressBar({ current, goal, className }: ProgressBarProps) {
             Goal
           </span>
           <div className="text-sm font-bold text-primary font-mono">
-            RM {goal.toLocaleString()}
+            ⟠ {goal.toLocaleString()}
           </div>
         </div>
       </div>
@@ -76,11 +76,11 @@ export function ProgressBar({ current, goal, className }: ProgressBarProps) {
 
       {/* Tooltip or additional info if needed */}
       <div className="flex justify-between text-[10px] font-medium text-muted-foreground/70 uppercase tracking-tighter">
-        <span>Raised: RM {current.toLocaleString()}</span>
+        <span>Raised: ⟠ {current.toLocaleString()}</span>
         {percentage >= 100 ? (
           <span className="text-chart-2 font-bold">Goal Reached!</span>
         ) : (
-          <span>Remaining: RM {(goal - current > 0 ? goal - current : 0).toLocaleString()}</span>
+          <span>Remaining: ⟠ {(goal - current > 0 ? goal - current : 0).toLocaleString()}</span>
         )}
       </div>
     </div>

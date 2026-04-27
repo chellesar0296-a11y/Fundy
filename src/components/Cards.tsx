@@ -86,7 +86,7 @@ export function CampaignCard({ campaign }: CampaignCardProps) {
             <div className="flex justify-between items-end mb-1">
               <div className="flex flex-col">
                 <span className="text-xs text-muted-foreground uppercase tracking-wider font-bold">{t('label_raised')}</span>
-                <span className="text-lg font-mono font-bold text-primary">RM {campaign.currentAmount.toLocaleString()}</span>
+                <span className="text-lg font-mono font-bold text-primary">⟠ {campaign.currentAmount.toLocaleString()}</span>
               </div>
               <span className="text-sm font-bold text-primary">{progress}%</span>
             </div>
@@ -101,7 +101,7 @@ export function CampaignCard({ campaign }: CampaignCardProps) {
             <div className="flex justify-between text-xs font-medium">
               <div className="flex items-center gap-1 text-muted-foreground">
                 <Target className="w-3 h-3" />
-                <span>{t('label_goal')}: <span className="font-mono font-semibold text-foreground">RM {campaign.goalAmount.toLocaleString()}</span></span>
+                <span>{t('label_goal')}: <span className="font-mono font-semibold text-foreground">⟠ {campaign.goalAmount.toLocaleString()}</span></span>
               </div>
               <div className="flex items-center gap-1 text-muted-foreground">
                 <Calendar className="w-3 h-3" />
