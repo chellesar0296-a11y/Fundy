@@ -1,6 +1,6 @@
 {
   "name": "FundyToken",
-  "address": "0x68f302f89e1eafde30c4e17e6465cf6e25ec1a21",
+  "address": "0xd9145CCE52D386f254917e481eB44e9943F39138",
   "abi": [
     {
       "inputs": [
@@ -542,5 +542,5 @@
     }
   ],
   "filePath": "electron/contracts/FundyToken.sol",
-  "pinnedAt": 1777129222179
+  "pinnedAt": 1777264779900
 }

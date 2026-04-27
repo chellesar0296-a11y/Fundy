@@ -564,14 +564,16 @@ export default function CampaignDetail() {
         </div>
       </div>
 
-      {/* Donation Modal */}
+      {/* Donation Modal — scrollable with sticky header */}
       <Dialog open={isDonationOpen} onOpenChange={setIsDonationOpen}>
-        <DialogContent className="sm:max-w-[500px] p-0 overflow-hidden rounded-3xl">
-          <div className="bg-primary p-6 text-primary-foreground">
+        <DialogContent className="sm:max-w-[500px] p-0 overflow-hidden rounded-3xl flex flex-col max-h-[90vh]">
+          {/* Sticky coloured header */}
+          <div className="bg-primary p-6 text-primary-foreground shrink-0">
             <h3 className="text-2xl font-bold">{t('btn_donate')}</h3>
             <p className="opacity-90 text-sm">Supporting: {campaign.title}</p>
           </div>
-          <div className="p-6">
+          {/* Scrollable form body */}
+          <div className="p-6 overflow-y-auto flex-1">
             <DonationForm campaign={campaign} onClose={() => setIsDonationOpen(false)} />
           </div>
         </DialogContent>
