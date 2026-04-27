@@ -27,11 +27,8 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 
-// 1 RM = 0.001 ETH (testing rate)
-const RM_TO_ETH = 0.001;
-
 const donationSchema = z.object({
-  amount: z.coerce.number().min(1, { message: 'Minimum donation is RM 1' }),
+  amount: z.coerce.number().min(0.0001, { message: 'Minimum donation is 0.0001 ETH' }),
   message: z.string().max(200).optional(),
   isAnonymous: z.boolean().default(false),
 });
@@ -52,10 +49,10 @@ export function DonationForm({ campaign, onClose }: { campaign: Campaign; onClos
 
   const form = useForm<DonationValues>({
     resolver: zodResolver(donationSchema),
-    defaultValues: { amount: 25, message: '', isAnonymous: false },
+    defaultValues: { amount: 0.025, message: '', isAnonymous: false },
   });
 
-  const presets = [10, 25, 50, 100];
+  const presets = [0.01, 0.025, 0.05, 0.1];
 
   async function onSubmit(values: DonationValues) {
     if (!isConnected) {
@@ -67,8 +64,7 @@ export function DonationForm({ campaign, onClose }: { campaign: Campaign; onClos
     setTxHash(null);
 
     try {
-      const amountRm  = values.amount;
-      const amountEth = (amountRm * RM_TO_ETH).toFixed(6);
+      const amountEth = values.amount.toFixed(6);
 
       // campaign.onChainId must exist — set when organizer creates campaign on-chain
       const onChainId = (campaign as any).onChainId as number | undefined;
@@ -96,16 +92,16 @@ export function DonationForm({ campaign, onClose }: { campaign: Campaign; onClos
       // Save to Supabase
       await submitDonation({
         campaign_id: campaign.id,
-        donor_id:    user?.id,
-        donor_name:  values.isAnonymous ? 'Anonymous' : (user?.name ?? 'Guest'),
-        amount:      amountRm,
-        message:     values.message,
+        donor_id: user?.id,
+        donor_name: values.isAnonymous ? 'Anonymous' : (user?.name ?? 'Guest'),
+        amount: values.amount,
+        message: values.message,
         is_anonymous: values.isAnonymous,
       });
 
       setTxHash(receipt?.hash ?? 'confirmed');
       await refreshBalance();
-      toast.success(`Donation successful! RM${amountRm} contributed.`);
+      toast.success(`Donation successful! ${amountEth} ETH contributed.`);
       if (onClose) setTimeout(onClose, 2500);
 
     } catch (err: any) {
@@ -173,8 +169,7 @@ export function DonationForm({ campaign, onClose }: { campaign: Campaign; onClos
   }
 
   const watchAmount = form.watch('amount') || 0;
-  const ethEquiv = (watchAmount * RM_TO_ETH).toFixed(6);
-  const fdyEquiv = (watchAmount * RM_TO_ETH * 100).toFixed(2);
+  const fdyEquiv = (watchAmount * 100).toFixed(2);
 
   return (
     <motion.div
@@ -204,7 +199,7 @@ export function DonationForm({ campaign, onClose }: { campaign: Campaign; onClos
           </TabsTrigger>
         </TabsList>
         <p className="text-[10px] text-muted-foreground text-center mt-2">
-          {payMethod === 'fdy' ? '✨ Using FDY helps campaign reach goal · FDY will be burned' : '💎 1 RM = 0.001 ETH'}
+          {payMethod === 'fdy' ? '✨ Using FDY helps campaign reach goal · FDY will be burned' : null}
         </p>
       </Tabs>
 
@@ -212,7 +207,7 @@ export function DonationForm({ campaign, onClose }: { campaign: Campaign; onClos
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5">
           {/* Amount */}
           <div className="space-y-3">
-            <Label className="text-base font-semibold">Donation Amount (RM)</Label>
+            <Label className="text-base font-semibold">Donation Amount (ETH)</Label>
             <div className="grid grid-cols-4 gap-2">
               {presets.map((p) => (
                 <Button key={p} type="button"
@@ -220,7 +215,7 @@ export function DonationForm({ campaign, onClose }: { campaign: Campaign; onClos
                   className="h-11 font-semibold"
                   onClick={() => handlePresetClick(p)}
                 >
-                  RM{p}
+                  ⟠ {p}
                 </Button>
               ))}
             </div>
@@ -228,7 +223,7 @@ export function DonationForm({ campaign, onClose }: { campaign: Campaign; onClos
               <FormItem>
                 <FormControl>
                   <div className="relative">
-                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground font-bold text-sm">RM</span>
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground font-bold text-sm">⟠ </span>
                     <Input type="number" className="pl-12 h-14 text-xl font-bold"
                       {...field}
                       onChange={(e) => { field.onChange(e); setSelectedPreset(null); }}
@@ -239,8 +234,7 @@ export function DonationForm({ campaign, onClose }: { campaign: Campaign; onClos
               </FormItem>
             )} />
             <p className="text-xs text-right text-muted-foreground">
-              {payMethod === 'eth' ? `≈ ${ethEquiv} ETH` : `≈ ${fdyEquiv} FDY`}
-              <span className="ml-2 text-[10px]">(1 RM = {RM_TO_ETH} ETH)</span>
+              {payMethod === 'eth' ? 'Paying in ETH' : `≈ ${fdyEquiv} FDY`}
             </p>
           </div>
 
@@ -279,9 +273,9 @@ export function DonationForm({ campaign, onClose }: { campaign: Campaign; onClos
             ) : (
               <span className="flex items-center gap-2">
                 <Heart className="h-5 w-5 fill-current" />
-                Donate RM{watchAmount}
+                Donate {watchAmount} ETH
                 <span className="text-sm opacity-80">
-                  ({payMethod === 'eth' ? `${ethEquiv} ETH` : `${fdyEquiv} FDY`})
+                  ({payMethod === 'fdy' ? `${fdyEquiv} FDY` : 'ETH'})
                 </span>
               </span>
             )}

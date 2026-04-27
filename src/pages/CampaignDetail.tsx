@@ -76,12 +76,12 @@ export default function CampaignDetail() {
           CROWDFUNDING_ABI,
           provider,
         );
-        
+
         // Step 1: Find which on-chain campaignId matches this supabaseId
         const campaignCount = await contract.campaignCount();
-        
+
         let onChainId: number | null = null;
-        
+
         for (let i = 1; i <= campaignCount; i++) {
           try {
             const c = await contract.getCampaign(i);
@@ -93,17 +93,17 @@ export default function CampaignDetail() {
             continue;
           }
         }
-        
+
         if (!onChainId) {
           if (!cancelled) setOnChainDonors([]);
           return;
         }
-        
+
         // Step 2: Get donors using getDonors
         const donorsList = await contract.getDonors(onChainId);
-        
+
         if (cancelled) return;
-        
+
         // Get each donor's ETH amount
         const donors = await Promise.all(
           donorsList.map(async (donor: string) => {
@@ -111,45 +111,44 @@ export default function CampaignDetail() {
             return {
               address: donor,
               amount: ethers.formatEther(amount),
-              amountRm: (Number(ethers.formatEther(amount)) / 0.001).toFixed(0),
               date: null,
               txHash: '',
               name: null as string | null,
             };
           })
         );
-        
+
         // Filter out zero donations and sort by amount
         const filtered = donors.filter(d => Number(d.amount) > 0);
         filtered.sort((a, b) => Number(b.amount) - Number(a.amount));
-        
+
         // Look up names from Supabase profiles by wallet_address
         if (filtered.length > 0) {
           try {
             const { supabase } = await import('@/lib/supabase');
             const addresses = filtered.map(d => d.address);
-            console.log('Querying addresses:', addresses); 
-            
+            console.log('Querying addresses:', addresses);
+
             const { data, error } = await supabase
               .from('profiles')
               .select('name, wallet_address')
               .in('wallet_address', addresses);
-            
-            console.log('Query result:', data, error); 
-            
+
+            console.log('Query result:', data, error);
+
             if (data && data.length > 0) {
               const nameMap: Record<string, string> = {};
               data.forEach((p: any) => {
                 if (p.wallet_address) {
                   nameMap[p.wallet_address] = p.name;
-                  console.log(`Mapped: ${p.wallet_address} -> ${p.name}`); 
+                  console.log(`Mapped: ${p.wallet_address} -> ${p.name}`);
                 }
               });
-              
+
               filtered.forEach(d => {
                 const matchedName = nameMap[d.address];
                 d.name = matchedName ?? null;
-                console.log(`Donor ${d.address}: matched name = ${matchedName}`); 
+                console.log(`Donor ${d.address}: matched name = ${matchedName}`);
               });
             } else {
               console.log('No profiles found for addresses');
@@ -158,7 +157,7 @@ export default function CampaignDetail() {
             console.error('Failed to fetch profile names:', err);
           }
         }
-        
+
         if (!cancelled) setOnChainDonors(filtered);
       } catch (err) {
         console.error('Failed to fetch donors:', err);
@@ -551,7 +550,7 @@ export default function CampaignDetail() {
                               {donor.name ?? 'Anonymous'}
                             </p>
                             <p className="text-xs text-muted-foreground">
-                              RM{donor.amountRm} · {donor.date ? donor.date.toLocaleDateString() : '—'}
+                              {donor.amount} ETH · {donor.date ? donor.date.toLocaleDateString() : '—'}
                             </p>
                           </div>
                         </div>
@@ -649,11 +648,11 @@ function ExtraFdyRewardCard({ onChainId }: { onChainId: number }) {
         const contract = new ethers.Contract(CONTRACT_ADDRESSES.crowdfunding, CROWDFUNDING_ABI, provider);
         const c = await contract.getCampaign(onChainId);
         setInfo({
-          hasExtra:  c.hasExtraToken,
-          amount:    ethers.formatEther(c.extraTokenAmount),
-          minDonate: (Number(ethers.formatEther(c.extraTokenMinDonate)) / 0.001).toFixed(0),
+          hasExtra: c.hasExtraToken,
+          amount: ethers.formatEther(c.extraTokenAmount),
+          minDonate: Number(ethers.formatEther(c.extraTokenMinDonate)).toFixed(4),
         });
-      } catch {}
+      } catch { }
     })();
   }, [provider, onChainId]);
 
@@ -677,7 +676,7 @@ function ExtraFdyRewardCard({ onChainId }: { onChainId: number }) {
         <span className="text-xs font-normal bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Active</span>
       </p>
       <p className="text-sm text-amber-800">
-        Donate <strong>RM{info.minDonate}+</strong> and receive an extra <strong>{Number(info.amount).toLocaleString()} FDY</strong> tokens on top of the automatic reward.
+        Donate <strong>{info.minDonate} ETH+</strong> and receive an extra <strong>{Number(info.amount).toLocaleString()} FDY</strong> tokens on top of the automatic reward.
       </p>
       <p className="text-xs text-amber-600">FDY tokens are funded by the campaign organizer and distributed automatically on-chain.</p>
     </div>

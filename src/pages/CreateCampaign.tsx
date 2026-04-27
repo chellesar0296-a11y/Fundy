@@ -37,7 +37,7 @@ const schema = z.object({
   short_description: z.string().min(20, 'Short description must be at least 20 characters').max(200),
   description: z.string().min(50, 'Description must be at least 50 characters'),
   category: z.enum(CATEGORIES),
-  goal_amount: z.coerce.number().min(100, 'Minimum goal is RM 100').max(10000000),
+  goal_amount: z.coerce.number().min(0.001, 'Minimum goal is 0.001 ETH').max(1000),
   end_date: z.string().min(1, 'End date is required'),
   image_url: z.string().url('Must be a valid URL').optional().or(z.literal('')),
 });
@@ -69,7 +69,7 @@ function TierEditor({ tier, index, onUpdate, onRemove }: {
         <div className={`p-2 rounded-lg border ${meta.color}`}><Icon className="w-4 h-4" /></div>
         <div className="flex-1 min-w-0">
           <p className="font-semibold text-sm truncate">{tier.name || `Reward tier ${index + 1}`}</p>
-          <p className="text-xs text-muted-foreground">Donate ≥ RM{tier.minAmount} · {meta.label}</p>
+          <p className="text-xs text-muted-foreground">Donate ≥ {tier.minAmount} ETH · {meta.label}</p>
         </div>
         <div className="flex items-center gap-2">
           <Button type="button" variant="ghost" size="icon" className="text-destructive hover:text-destructive h-7 w-7"
@@ -89,9 +89,9 @@ function TierEditor({ tier, index, onUpdate, onRemove }: {
             <div className="px-5 pb-5 pt-2 space-y-4 border-t border-border bg-muted/10">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
-                  <Label className="text-xs">Minimum donation (RM)</Label>
+                  <Label className="text-xs">Minimum donation (ETH)</Label>
                   <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-mono text-sm">RM</span>
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-mono text-sm">⟠ </span>
                     <Input type="number" min={1} className="pl-7 font-mono"
                       value={tier.minAmount}
                       onChange={(e) => set('minAmount', Number(e.target.value))} />
@@ -176,7 +176,7 @@ export default function CreateCampaign() {
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: { title: '', short_description: '', description: '', category: 'Personal', goal_amount: 5000, end_date: '', image_url: '' },
+    defaultValues: { title: '', short_description: '', description: '', category: 'Personal', goal_amount: 10, end_date: '', image_url: '' },
   });
 
   if (authLoading) return (
@@ -253,10 +253,10 @@ export default function CreateCampaign() {
       let onChainId: number | null = null;
       try {
         toast.info(extraFdyAmount ? 'Step 2/2: Registering campaign on-chain...' : 'Confirm in MetaMask...');
-        const goalEth = (values.goal_amount * 0.001).toFixed(6);
+        const goalEth = values.goal_amount.toFixed(6);
         const deadlineTs = Math.floor(new Date(values.end_date).getTime() / 1000);
         const extraFdyWei = extraFdyAmount || '0';
-        const extraMinEth = extraFdyMinRm ? (Number(extraFdyMinRm) * 0.001).toFixed(6) : '0';
+        const extraMinEth = extraFdyMinRm ? Number(extraFdyMinRm).toFixed(6) : '0';
         onChainId = await createCampaignOnChain(campaign.id, goalEth, deadlineTs, '', extraFdyWei, extraMinEth);
 
         // update on_chain_id
@@ -394,11 +394,11 @@ export default function CreateCampaign() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   <FormField control={form.control} name="goal_amount" render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Goal amount (RM)</FormLabel>
+                      <FormLabel>Goal amount (ETH)</FormLabel>
                       <FormControl>
                         <div className="relative">
-                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-mono font-bold">RM</span>
-                          <Input type="number" min={100} className="pl-7 font-mono" {...field} />
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-mono font-bold">⟠</span>
+                          <Input type="number" min={0.001} step={0.001} className="pl-7 font-mono" {...field} />
                         </div>
                       </FormControl>
                       <FormMessage />
@@ -489,15 +489,15 @@ export default function CreateCampaign() {
                           <p className="text-[10px] text-amber-700">FDY tokens per qualifying donation</p>
                         </div>
                         <div className="space-y-1">
-                          <label className="text-xs font-semibold text-amber-900">Min donation (RM)</label>
-                          <input type="number" min="0" placeholder="e.g. 50"
+                          <label className="text-xs font-semibold text-amber-900">Min donation (ETH)</label>
+                          <input type="number" min="0" placeholder="e.g. 20"
                             value={extraFdyMinRm} onChange={e => setExtraFdyMinRm(e.target.value)}
                             className="w-full px-3 py-2 text-sm border border-amber-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white" />
-                          <p className="text-[10px] text-amber-700">Minimum RM to qualify</p>
+                          <p className="text-[10px] text-amber-700">Minimum ETH to qualify</p>
                         </div>
                         <div className="space-y-1">
                           <label className="text-xs font-semibold text-amber-900">Total FDY budget</label>
-                          <input type="number" min="0" placeholder="e.g. 50000"
+                          <input type="number" min="0" placeholder="e.g. 10"
                             value={extraFdyBudget} onChange={e => setExtraFdyBudget(e.target.value)}
                             className="w-full px-3 py-2 text-sm border border-amber-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white" />
                           <p className="text-[10px] text-amber-700">Max total FDY you will spend</p>

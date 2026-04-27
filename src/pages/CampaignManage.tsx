@@ -43,11 +43,11 @@ function ExtraFdyRewardCard({ onChainId }: { onChainId: number }) {
         const contract = new ethers.Contract(CONTRACT_ADDRESSES.crowdfunding, CROWDFUNDING_ABI, provider);
         const c = await contract.getCampaign(onChainId);
         setInfo({
-          hasExtra:  c.hasExtraToken,
-          amount:    ethers.formatEther(c.extraTokenAmount),
-          minDonate: (Number(ethers.formatEther(c.extraTokenMinDonate)) / 0.001).toFixed(0),
+          hasExtra: c.hasExtraToken,
+          amount: ethers.formatEther(c.extraTokenAmount),
+          minDonate: Number(ethers.formatEther(c.extraTokenMinDonate)).toFixed(4),
         });
-      } catch {}
+      } catch { }
     })();
   }, [provider, onChainId]);
 
@@ -71,7 +71,7 @@ function ExtraFdyRewardCard({ onChainId }: { onChainId: number }) {
         <span className="text-xs font-normal bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Active</span>
       </p>
       <p className="text-sm text-amber-800">
-        Donate <strong>RM{info.minDonate}+</strong> and receive an extra <strong>{Number(info.amount).toLocaleString()} FDY</strong> tokens on top of the automatic reward.
+        Donate <strong>{info.minDonate} ETH+</strong> and receive an extra <strong>{Number(info.amount).toLocaleString()} FDY</strong> tokens on top of the automatic reward.
       </p>
       <p className="text-xs text-amber-600">FDY tokens are funded by the campaign organizer and distributed automatically on-chain.</p>
     </div>
@@ -93,13 +93,13 @@ function CancelRequestDialog({
 
   if (existingRequest) {
     const statusIcon = {
-      pending:  <Clock className="w-5 h-5 text-amber-500" />,
+      pending: <Clock className="w-5 h-5 text-amber-500" />,
       approved: <CheckCircle2 className="w-5 h-5 text-emerald-500" />,
       rejected: <XCircle className="w-5 h-5 text-destructive" />,
     }[existingRequest.status];
 
     const statusColor = {
-      pending:  'bg-amber-100 text-amber-700',
+      pending: 'bg-amber-100 text-amber-700',
       approved: 'bg-emerald-100 text-emerald-700',
       rejected: 'bg-red-100 text-red-700',
     }[existingRequest.status];
@@ -210,9 +210,9 @@ export default function CampaignManage() {
   const [activeTab, setActiveTab] = useState('overview');
 
   // Withdrawal state
-  const [isWithdrawing, setIsWithdrawing]       = useState(false);
-  const [onChainData, setOnChainData]           = useState<any>(null);
-  const [loadingOnChain, setLoadingOnChain]     = useState(false);
+  const [isWithdrawing, setIsWithdrawing] = useState(false);
+  const [onChainData, setOnChainData] = useState<any>(null);
+  const [loadingOnChain, setLoadingOnChain] = useState(false);
 
   // Update post state
   const [updateTitle, setUpdateTitle] = useState('');
@@ -275,36 +275,36 @@ export default function CampaignManage() {
   }, [campaign?.onChainId]);
 
   const handleWithdraw = async () => {
-  if (!campaign?.onChainId) return;
-  if (!isConnected) {
-    toast.error('Please connect your wallet first.');
-    await connect();
-    return;
-  }
-  setIsWithdrawing(true);
-  try {
-    await withdrawFunds(campaign.onChainId);
-    toast.success('Funds withdrawn successfully!');
-    
-    // ✅ UPDATE CAMPAIGN STATUS TO 'completed' HERE
-    await updateCampaign(id!, {
-      status: 'completed'
-    });
-    
-    // Refresh on-chain data
-    const updated = await getCampaignOnChain(campaign.onChainId);
-    setOnChainData(updated);
-    
-    // Optional: Show additional message
-    toast.success('Campaign marked as completed!');
-    
-  } catch (err: any) {
-    const msg = err?.reason ?? err?.message ?? 'Withdrawal failed';
-    toast.error(msg);
-  } finally {
-    setIsWithdrawing(false);
-  }
-};
+    if (!campaign?.onChainId) return;
+    if (!isConnected) {
+      toast.error('Please connect your wallet first.');
+      await connect();
+      return;
+    }
+    setIsWithdrawing(true);
+    try {
+      await withdrawFunds(campaign.onChainId);
+      toast.success('Funds withdrawn successfully!');
+
+      // ✅ UPDATE CAMPAIGN STATUS TO 'completed' HERE
+      await updateCampaign(id!, {
+        status: 'completed'
+      });
+
+      // Refresh on-chain data
+      const updated = await getCampaignOnChain(campaign.onChainId);
+      setOnChainData(updated);
+
+      // Optional: Show additional message
+      toast.success('Campaign marked as completed!');
+
+    } catch (err: any) {
+      const msg = err?.reason ?? err?.message ?? 'Withdrawal failed';
+      toast.error(msg);
+    } finally {
+      setIsWithdrawing(false);
+    }
+  };
 
   const isOrganizer = campaign?.organizer.id === user?.id;
 
@@ -413,7 +413,7 @@ export default function CampaignManage() {
 
   // Cancel request status badge
   const cancelRequestBadge = cancelRequest ? {
-    pending:  <Badge className="bg-amber-100 text-amber-700 border-0 text-xs">Cancel Pending Review</Badge>,
+    pending: <Badge className="bg-amber-100 text-amber-700 border-0 text-xs">Cancel Pending Review</Badge>,
     approved: <Badge className="bg-red-100 text-red-700 border-0 text-xs">Cancel Approved</Badge>,
     rejected: <Badge className="bg-slate-100 text-slate-600 border-0 text-xs">Cancel Rejected</Badge>,
   }[cancelRequest.status] : null;
@@ -443,8 +443,8 @@ export default function CampaignManage() {
               />
               <p className="font-semibold text-sm line-clamp-2">{campaign.title}</p>
               <div className="flex justify-between text-xs text-muted-foreground">
-                <span>RM{campaign.currentAmount.toLocaleString()} raised</span>
-                <span>RM{campaign.goalAmount.toLocaleString()} goal</span>
+                <span>{campaign.currentAmount.toLocaleString()} ETH raised</span>
+                <span>{campaign.goalAmount.toLocaleString()} ETH goal</span>
               </div>
             </CardContent>
           </Card>
@@ -468,12 +468,10 @@ export default function CampaignManage() {
           {/* Withdraw Funds */}
           {campaign.onChainId && (() => {
             const totalRaisedEth = onChainData ? Number(ethers.formatEther(onChainData.totalRaisedEth)) : 0;
-            const goalEth        = onChainData ? Number(ethers.formatEther(onChainData.goalAmount))     : 0;
-            const totalRaisedRm  = (totalRaisedEth * 1000).toFixed(0);
-            const goalRm         = (goalEth * 1000).toFixed(0);
-            const goalReached    = onChainData ? (onChainData.totalRaisedEth + onChainData.totalRaisedFdy >= onChainData.goalAmount) : false;
+            const goalEth = onChainData ? Number(ethers.formatEther(onChainData.goalAmount)) : 0;
+            const goalReached = onChainData ? (onChainData.totalRaisedEth + onChainData.totalRaisedFdy >= onChainData.goalAmount) : false;
             const alreadyWithdrawn = onChainData?.withdrawn ?? false;
-            const cancelled      = onChainData?.cancelled ?? false;
+            const cancelled = onChainData?.cancelled ?? false;
 
             return (
               <Card className="border-primary/20">
@@ -492,11 +490,11 @@ export default function CampaignManage() {
                       <div className="space-y-1 text-xs">
                         <div className="flex justify-between">
                           <span className="text-muted-foreground">Total Raised</span>
-                          <span className="font-semibold">RM{Number(totalRaisedRm).toLocaleString()}</span>
+                          <span className="font-semibold">{totalRaisedEth.toFixed(4)} ETH</span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-muted-foreground">Goal</span>
-                          <span className="font-semibold">RM{Number(goalRm).toLocaleString()}</span>
+                          <span className="font-semibold">{goalEth.toFixed(4)} ETH</span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-muted-foreground">Status</span>
@@ -750,7 +748,7 @@ export default function CampaignManage() {
                   <Button onClick={handlePostUpdate} disabled={isPostingUpdate || isUploadingMedia} className="w-full">
                     {isUploadingMedia ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Uploading image...</>
                       : isPostingUpdate ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Publishing...</>
-                      : <><Send className="w-4 h-4 mr-2" /> Publish Update</>}
+                        : <><Send className="w-4 h-4 mr-2" /> Publish Update</>}
                   </Button>
                 </CardContent>
               </Card>
