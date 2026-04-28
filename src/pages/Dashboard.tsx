@@ -84,7 +84,8 @@ function CampaignStatusBadge({ status }: { status: string }) {
 export default function Dashboard() {
   const { t } = useLanguage();
   const { user, isAuthenticated, logout, updateProfile, isLoading, refreshProfile } = useAuth();
-  const { isConnected, address, provider, signer, fdyBalance, ethBalance } = useWeb3();
+  const { isConnected, address, provider, signer, ethBalance } = useWeb3();
+  
 
   useEffect(() => {
     refreshProfile?.();
@@ -107,6 +108,9 @@ export default function Dashboard() {
   const [campaignsLoading, setCampaignsLoading] = useState(true);
   const [userRewards, setUserRewards] = useState<(DbReward & { campaigns: { title: string } })[]>([]);
   const [rewardsLoading, setRewardsLoading] = useState(true);
+  const [verificationStatus, setVerificationStatus] = useState<string | null>(null);
+  const [verificationRejectedReason, setVerificationRejectedReason] = useState<string | null>(null);
+  const [verificationLoading, setVerificationLoading] = useState(true);
 
   const claimRefund = async (campaignId: number) => {
     if (!signer) {
@@ -201,7 +205,6 @@ export default function Dashboard() {
               txHash: e.transactionHash,
               campaignId: Number(e.args.campaignId),
               amount: ethers.formatEther(e.args.ethAmount),
-              tokens: ethers.formatEther(e.args.fdyMinted),
               timestamp: block ? new Date(Number(block.timestamp) * 1000) : null,
             };
           } catch {
@@ -210,7 +213,6 @@ export default function Dashboard() {
               txHash: e.transactionHash,
               campaignId: Number(e.args.campaignId),
               amount: ethers.formatEther(e.args.ethAmount),
-              tokens: '0',
               timestamp: null,
             };
           }
@@ -305,6 +307,45 @@ export default function Dashboard() {
     return () => { cancelled = true; };
   }, [isConnected, address, provider]);
 
+  useEffect(() => {
+    if (!user?.id) {
+      setVerificationLoading(false);
+      return;
+    }
+    
+    const fetchVerificationStatus = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('verification_requests')
+          .select('status, admin_note')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+        
+        if (error && error.code !== 'PGRST116') {
+          console.error('Error fetching verification:', error);
+          setVerificationStatus(null);
+          setVerificationRejectedReason(null);
+        } else if (data) {
+          setVerificationStatus(data.status);
+          setVerificationRejectedReason(data.admin_note || null);
+        } else {
+          setVerificationStatus(null);
+          setVerificationRejectedReason(null);
+        }
+      } catch (err) {
+        console.error('Failed to fetch verification:', err);
+        setVerificationStatus(null);
+        setVerificationRejectedReason(null);
+      } finally {
+        setVerificationLoading(false);
+      }
+    };
+    
+    fetchVerificationStatus();
+  }, [user?.id]);
+
   if (!isAuthenticated && !isLoading) {
     return (
       <div className="min-h-[80vh] flex flex-col items-center justify-center p-6 text-center">
@@ -333,6 +374,11 @@ export default function Dashboard() {
         <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
       </div>
     );
+  }
+
+  if (user?.role === 'admin') {
+    navigate('/admin');
+    return null;
   }
 
   const totalDonated = userDonations.reduce((sum, d) => sum + d.amount, 0);
@@ -368,7 +414,15 @@ export default function Dashboard() {
         </header>
 
         {/* Verification Banner */}
-        {(user.isVerified || user.verificationStatus === 'approved') ? (
+        {verificationLoading ? (
+          <div className="mb-6 flex items-center gap-4 p-4 bg-muted/30 border rounded-xl animate-pulse">
+            <div className="w-5 h-5 rounded-full bg-muted/50" />
+            <div className="flex-1">
+              <div className="h-4 w-40 bg-muted/50 rounded" />
+              <div className="h-3 w-64 bg-muted/50 rounded mt-1" />
+            </div>
+          </div>
+        ) : (user.isVerified || verificationStatus === 'approved') ? (
           <div className="mb-6 flex items-center gap-4 p-4 bg-emerald-50 border border-emerald-200 rounded-xl">
             <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
             <div>
@@ -376,12 +430,35 @@ export default function Dashboard() {
               <p className="text-xs text-emerald-700 mt-0.5">Your identity has been verified. A verified badge is displayed on your profile and campaigns.</p>
             </div>
           </div>
-        ) : user.verificationStatus === 'pending' ? (
+        ) : verificationStatus === 'pending' ? (
           <div className="mb-6 flex items-center gap-4 p-4 bg-amber-50 border border-amber-200 rounded-xl">
             <Clock className="w-5 h-5 text-amber-600 shrink-0" />
-            <div>
+            <div className="flex-1">
               <p className="font-semibold text-sm text-amber-800">Verification Under Review</p>
-              <p className="text-xs text-amber-700 mt-0.5">Your verification request has been submitted and is being reviewed by our team. This usually takes 1–3 business days.</p>
+              <p className="text-xs text-amber-700 mt-0.5">
+                Your verification request has been submitted and is being reviewed by our team. This usually takes 1–3 business days.
+              </p>
+            </div>
+          </div>
+        ) : verificationStatus === 'rejected' ? (
+          <div className="mb-6 flex items-start gap-4 p-4 bg-red-50 border border-red-200 rounded-xl">
+            <ShieldAlert className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="font-semibold text-sm text-red-800">Verification Not Approved</p>
+              <p className="text-xs text-red-700 mt-0.5">
+                Your verification request was not approved.
+                {verificationRejectedReason && (
+                  <span className="block mt-1 font-medium">Reason: {verificationRejectedReason}</span>
+                )}
+              </p>
+              <Button 
+                size="sm" 
+                variant="destructive" 
+                className="mt-3 h-7 text-xs"
+                onClick={() => navigate('/verify')}
+              >
+                Resubmit for Verification
+              </Button>
             </div>
           </div>
         ) : (
@@ -667,7 +744,6 @@ export default function Dashboard() {
                   </div>
                   <div className="text-right text-sm">
                     <p className="font-bold">{ethBalance} ETH</p>
-                    <p className="text-primary font-semibold">{Number(fdyBalance).toFixed(0)} FDY</p>
                   </div>
                 </div>
               )}
@@ -703,7 +779,6 @@ export default function Dashboard() {
                           <th className="px-5 py-3 text-left font-medium">Date</th>
                           <th className="px-5 py-3 text-left font-medium">Campaign</th>
                           <th className="px-5 py-3 text-left font-medium">Amount (ETH)</th>
-                          <th className="px-5 py-3 text-left font-medium">FDY Earned</th>
                           <th className="px-5 py-3 text-left font-medium">Action</th>
                           <th className="px-5 py-3 text-left font-medium">Tx Hash</th>
                         </tr>
@@ -742,7 +817,7 @@ export default function Dashboard() {
                               <span className={`font-semibold ${tx.type === 'refunded' ? 'text-emerald-600' : 'text-slate-800'
                                 }`}>
                                 {tx.type === 'refunded' ? '+ ' : '- '}
-                                {Number(tx.amount).toFixed(4)} ETH
+                                {Number(tx.amount).toFixed(5)} ETH
                               </span>
                               {tx.type !== 'refunded' && (() => {
                                 const alreadyRefunded = onChainTxs.some(
@@ -770,14 +845,6 @@ export default function Dashboard() {
                                   </div>
                                 );
                               })()}
-                            </td>
-
-                            <td className="px-5 py-3">
-                              {tx.type === 'refunded' ? (
-                                <span className="text-xs text-muted-foreground italic">N/A</span>
-                              ) : (
-                                <p className="text-primary font-semibold">+{Number(tx.tokens).toFixed(2)} FDY</p>
-                              )}
                             </td>
 
                             <td className="px-5 py-3">

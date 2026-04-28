@@ -37,7 +37,7 @@ export function Layout({ children }: LayoutProps) {
   const { user, isAuthenticated, logout } = useAuth();
   const { disconnect, provider, address } = useWeb3();
   const location = useLocation();
-  
+
   // Refs to prevent multiple logout attempts
   const logoutInProgressRef = useRef(false);
   const logoutTimeoutRef = useRef<NodeJS.Timeout>();
@@ -81,7 +81,7 @@ export function Layout({ children }: LayoutProps) {
         try {
           await Promise.race([
             disconnect(),
-            new Promise((_, reject) => 
+            new Promise((_, reject) =>
               setTimeout(() => reject(new Error('Web3 disconnect timeout')), 5000)
             )
           ]);
@@ -96,7 +96,7 @@ export function Layout({ children }: LayoutProps) {
         try {
           await Promise.race([
             markAllRead(),
-            new Promise((_, reject) => 
+            new Promise((_, reject) =>
               setTimeout(() => reject(new Error('Mark read timeout')), 3000)
             )
           ]);
@@ -116,7 +116,7 @@ export function Layout({ children }: LayoutProps) {
       // Step 4: Perform auth logout
       await Promise.race([
         logout(),
-        new Promise((_, reject) => 
+        new Promise((_, reject) =>
           setTimeout(() => reject(new Error('Auth logout timeout')), 5000)
         )
       ]);
@@ -129,16 +129,16 @@ export function Layout({ children }: LayoutProps) {
 
     } catch (err: any) {
       console.error('Logout error:', err);
-      
+
       // Even if there's an error, we should try to clear local state
       try {
         // Force clear local storage
         localStorage.removeItem('supabase.auth.token');
         sessionStorage.removeItem('supabase.auth.token');
-        
+
         // Force logout from auth context
         await logout();
-        
+
         toast.warning('Logged out with some issues. Please refresh the page if needed.');
       } catch (finalErr) {
         console.error('Final logout attempt failed:', finalErr);
@@ -149,7 +149,7 @@ export function Layout({ children }: LayoutProps) {
       if (logoutTimeoutRef.current) {
         clearTimeout(logoutTimeoutRef.current);
       }
-      
+
       // Reset state after delay to prevent immediate re-attempts
       setTimeout(() => {
         logoutInProgressRef.current = false;
@@ -187,8 +187,11 @@ export function Layout({ children }: LayoutProps) {
     { path: ROUTE_PATHS.ABOUT, label: t('nav_about'), icon: Info },
   ];
 
+
   if (isAuthenticated) {
-    navLinks.push({ path: ROUTE_PATHS.DASHBOARD, label: t('nav_dashboard'), icon: LayoutDashboard });
+    if (user?.role !== 'admin') {
+      navLinks.push({ path: ROUTE_PATHS.DASHBOARD, label: t('nav_dashboard'), icon: LayoutDashboard });
+    }
     if (!isAdmin) {
       navLinks.push({ path: '/rewards', label: 'Rewards', icon: Gift });
     }
@@ -210,11 +213,10 @@ export function Layout({ children }: LayoutProps) {
 
       {/* Header */}
       <header
-        className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
-          isScrolled
+        className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${isScrolled
             ? 'bg-background/80 backdrop-blur-lg border-b border-border py-3'
             : 'bg-transparent py-5'
-        }`}
+          }`}
       >
         <div className="container mx-auto px-4 flex items-center justify-between">
           {/* Logo */}
@@ -234,8 +236,7 @@ export function Layout({ children }: LayoutProps) {
                 key={link.path}
                 to={link.path}
                 className={({ isActive }) =>
-                  `text-sm font-semibold transition-colors hover:text-primary ${
-                    isActive ? 'text-primary' : 'text-muted-foreground'
+                  `text-sm font-semibold transition-colors hover:text-primary ${isActive ? 'text-primary' : 'text-muted-foreground'
                   }`
                 }
               >
@@ -286,8 +287,8 @@ export function Layout({ children }: LayoutProps) {
 
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button 
-                      variant="ghost" 
+                    <Button
+                      variant="ghost"
                       className="relative h-10 w-10 rounded-full p-0 overflow-hidden border border-border"
                       disabled={isLoggingOut}
                     >
@@ -322,8 +323,8 @@ export function Layout({ children }: LayoutProps) {
                       </DropdownMenuItem>
                     )}
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem 
-                      onClick={handleLogout} 
+                    <DropdownMenuItem
+                      onClick={handleLogout}
                       className={`cursor-pointer text-destructive focus:text-destructive ${isLoggingOut ? 'opacity-50 pointer-events-none' : ''}`}
                       disabled={isLoggingOut}
                     >
@@ -394,8 +395,7 @@ export function Layout({ children }: LayoutProps) {
                   key={link.path}
                   to={link.path}
                   className={({ isActive }) =>
-                    `text-2xl font-bold flex items-center gap-4 transition-colors ${
-                      isActive ? 'text-primary' : 'text-foreground'
+                    `text-2xl font-bold flex items-center gap-4 transition-colors ${isActive ? 'text-primary' : 'text-foreground'
                     }`
                   }
                 >
@@ -427,9 +427,9 @@ export function Layout({ children }: LayoutProps) {
                       <p className="text-xs text-muted-foreground">{user?.email}</p>
                     </div>
                   </div>
-                  <Button 
-                    variant="outline" 
-                    className="w-full justify-start h-12 text-destructive" 
+                  <Button
+                    variant="outline"
+                    className="w-full justify-start h-12 text-destructive"
                     onClick={handleLogout}
                     disabled={isLoggingOut}
                   >
