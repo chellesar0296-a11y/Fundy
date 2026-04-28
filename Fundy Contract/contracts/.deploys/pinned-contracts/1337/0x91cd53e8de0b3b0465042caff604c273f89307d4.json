@@ -1,6 +1,6 @@
 {
   "name": "FundyCrowdfunding",
-  "address": "0xea3b7ff55dba587d6f0e56c5678b1e1a5e531b77",
+  "address": "0x91cd53e8de0b3b0465042caff604c273f89307d4",
   "abi": [
     {
       "inputs": [
@@ -896,5 +896,5 @@
     }
   ],
   "filePath": "electron/FundyCrowdfunding.sol",
-  "pinnedAt": 1777359502878
+  "pinnedAt": 1777367968341
 }
