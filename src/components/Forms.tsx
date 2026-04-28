@@ -47,6 +47,12 @@ export function DonationForm({ campaign, onClose }: { campaign: Campaign; onClos
   const [selectedPreset, setSelectedPreset] = useState<number | null>(null);
   const [payMethod, setPayMethod] = useState<'eth' | 'fdy'>('eth');
   const [txHash, setTxHash] = useState<string | null>(null);
+  useEffect(() => {
+  if (!isConnected || !address || !provider) return;
+  provider.getBalance(address).then((bal) => {
+    setBalance(ethers.formatEther(bal));
+  });
+}, [isConnected, address, provider]);
 
   const isOwnCampaign = !!user && user.id === campaign.organizer.id;
 
