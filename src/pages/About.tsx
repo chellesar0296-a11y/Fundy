@@ -104,34 +104,6 @@ export default function About() {
         </div>
       </section>
 
-      {/* Statistics Section */}
-      <section className="py-16 bg-background">
-        <div className="container mx-auto px-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            <StatsCard 
-              title={t('stats_raised')} 
-              value="$124M+" 
-              description="Total funds distributed to vetted causes since launch."
-            />
-            <StatsCard 
-              title={t('stats_donors')} 
-              value="2.5M+" 
-              description="Individual supporters across 140 different countries."
-            />
-            <StatsCard 
-              title={t('stats_campaigns')} 
-              value="18,400+" 
-              description="Successful campaigns ranging from medical to education."
-            />
-            <StatsCard 
-              title="Lives Impacted" 
-              value="8.2M" 
-              description="Direct beneficiaries of our global community's generosity."
-            />
-          </div>
-        </div>
-      </section>
-
       {/* Our Story Section */}
       <section className="py-24">
         <div className="container mx-auto px-4">
