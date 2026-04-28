@@ -40,5 +40,5 @@ node scripts/simulate-expiry.mjs <campaign-id(get from supabase)>
 example only dont use:
 node scripts/simulate-expiry.mjs 5bd0aaf0-c818-4a3a-ac97-f26f4632b562
 
-
+node scripts/reset-campaign.mjs ad1e0d1e-e574-4414-817f-84a5881ccf34 
 

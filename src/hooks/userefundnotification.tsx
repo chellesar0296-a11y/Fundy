@@ -81,12 +81,12 @@ function buildGoalReachedEmail(campaignTitle: string, campaignUrl: string, image
 // Email builder for expired campaign notification
 function buildCampaignExpiredEmail(campaignTitle: string, goalReached: boolean, campaignUrl: string, imageUrl?: string): string {
     const title = goalReached ? "Campaign Ended - Funds Available" : "Campaign Ended Without Goal";
-    const message = goalReached 
+    const message = goalReached
         ? "Your campaign has ended and successfully reached its funding goal! You can now withdraw the funds."
         : "Your campaign has ended without reaching its goal. Donors can now claim their refunds.";
     const buttonText = goalReached ? "Withdraw Funds →" : "View Campaign →";
     const buttonBg = goalReached ? "#111827" : "#4b5563";
-    
+
     return `
 <!DOCTYPE html>
 <html>
@@ -138,9 +138,62 @@ function buildCampaignExpiredEmail(campaignTitle: string, goalReached: boolean, 
 }
 
 // Email builder for donor refund notification (keeping your existing one)
+// Email builder for donor refund notification
 function buildRefundEmail(campaignTitle: string, message: string, campaignUrl: string, imageUrl?: string): string {
-    // ... (keep your existing refund email builder)
-    return `...`; // Your existing implementation
+    return `
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f4f4f5;font-family:'Helvetica Neue',Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;padding:40px 20px;">
+    <tr><td align="center">
+      <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+        <tr>
+          <td style="background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);padding:32px;text-align:center;">
+            <h1 style="margin:0;color:#ffffff;font-size:28px;font-weight:700;">💰 Refund Available</h1>
+           </table>
+          </tr>
+        ${imageUrl ? `<tr><td><img src="${imageUrl}" alt="${campaignTitle}" style="width:100%;height:200px;object-fit:cover;display:block;" /></tr>` : ''}
+        <tr>
+          <td style="padding:36px 40px;">
+            <div style="display:inline-block;background:#fee2e2;color:#991b1b;font-size:12px;font-weight:600;padding:4px 12px;border-radius:999px;margin-bottom:20px;letter-spacing:0.5px;text-transform:uppercase;">
+              Campaign Ended Without Goal
+            </div>
+            <h2 style="margin:0 0 12px;color:#111827;font-size:22px;font-weight:700;line-height:1.3;">Your donation is ready for refund</h2>
+            <p style="margin:0 0 8px;color:#4b5563;font-size:15px;line-height:1.6;">
+              The campaign <strong style="color:#111827;">"${campaignTitle}"</strong> has ended without reaching its funding goal.
+            </p>
+            <p style="margin:0 0 8px;color:#4b5563;font-size:15px;line-height:1.6;">
+              ${message}
+            </p>
+            <p style="margin:0 0 28px;color:#4b5563;font-size:15px;line-height:1.6;">
+              You can claim your refund directly from the campaign page. The refund will be sent back to your connected wallet.
+            </p>
+            <table cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="border-radius:12px;background:#dc2626;">
+                  <a href="${campaignUrl}" style="display:inline-block;padding:14px 32px;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;border-radius:12px;">
+                    Claim Your Refund →
+                  </a>
+                 </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:20px 40px;border-top:1px solid #f3f4f6;text-align:center;">
+              <p style="margin:0;color:#9ca3af;font-size:12px;">
+                You received this because you donated to this Fundy campaign.<br>
+                <a href="${campaignUrl}" style="color:#6b7280;">View Campaign Details</a>
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`.trim();
 }
 
 export function useRefundNotifications({ userId, address, provider }: UseRefundNotificationsOptions) {
@@ -158,14 +211,14 @@ export function useRefundNotifications({ userId, address, provider }: UseRefundN
                 CROWDFUNDING_ABI,
                 providerRef.current,
             );
-            
+
             // Get current user's profile for email
             const { data: userProfile } = await supabase
                 .from('profiles')
                 .select('email, name')
                 .eq('id', userId)
                 .single();
-            
+
             const userEmail = userProfile?.email ?? null;
 
             // ========== CHECK FOR GOAL REACHED (Active Campaigns) ==========
@@ -218,7 +271,7 @@ export function useRefundNotifications({ userId, address, provider }: UseRefundN
                                 `🎉 Goal Reached! - ${campaign.title}`,
                                 buildGoalReachedEmail(campaign.title, campaignUrl, campaign.image_url ?? undefined)
                             );
-                            
+
                             // Mark email as sent
                             await supabase
                                 .from('notifications')
@@ -267,7 +320,7 @@ export function useRefundNotifications({ userId, address, provider }: UseRefundN
                         ]);
 
                         const hasDonated = BigInt(ethDonated) > 0n;
-                        
+
                         // ===== DONOR REFUND NOTIFICATION =====
                         if (hasDonated && refundable) {
                             const donorNotified = alreadyNotified.get(campaign.id)?.has('refund_available');
@@ -297,7 +350,7 @@ export function useRefundNotifications({ userId, address, provider }: UseRefundN
                                         `💰 Refund available — ${campaign.title}`,
                                         buildRefundEmail(campaign.title, message, campaignUrl, campaign.image_url ?? undefined)
                                     );
-                                    
+
                                     await supabase
                                         .from('notifications')
                                         .update({ email_sent: true })
@@ -308,14 +361,14 @@ export function useRefundNotifications({ userId, address, provider }: UseRefundN
 
                         // ===== ORGANIZER EXPIRY NOTIFICATION =====
                         if (campaign.organizer_id === userId) {
-                            const orgNotified = alreadyNotified.get(campaign.id)?.has('campaign_expired');
-                            
-                            if (!orgNotified) {
-                                const campaignUrl = `${window.location.origin}/campaigns/${campaign.slug}`;
-                                const goalReached = await contract.isGoalReached(campaign.on_chain_id);
-                                
-                                if (refundable) {
-                                    // Goal not met — expired with refunds
+                            const campaignUrl = `${window.location.origin}/campaigns/${campaign.slug}`;
+                            const goalReached = await contract.isGoalReached(campaign.on_chain_id);
+
+                            if (refundable) {
+                                // Goal not met — expired with refunds
+                                const orgNotifiedExpired = alreadyNotified.get(campaign.id)?.has('campaign_expired');
+
+                                if (!orgNotifiedExpired) {
                                     const { data: newNotif, error: insertErr } = await supabase
                                         .from('notifications')
                                         .insert({
@@ -336,14 +389,18 @@ export function useRefundNotifications({ userId, address, provider }: UseRefundN
                                             `📢 Campaign Ended - ${campaign.title}`,
                                             buildCampaignExpiredEmail(campaign.title, false, campaignUrl, campaign.image_url ?? undefined)
                                         );
-                                        
+
                                         await supabase
                                             .from('notifications')
                                             .update({ email_sent: true })
                                             .eq('id', newNotif.id);
                                     }
-                                } else if (goalReached) {
-                                    // Goal met — organizer can withdraw
+                                }
+                            } else if (goalReached) {
+                                // Goal met — organizer can withdraw
+                                const orgNotifiedGoal = alreadyNotified.get(campaign.id)?.has('campaign_goal_reached');
+
+                                if (!orgNotifiedGoal) {
                                     const { data: newNotif, error: insertErr } = await supabase
                                         .from('notifications')
                                         .insert({
@@ -364,7 +421,7 @@ export function useRefundNotifications({ userId, address, provider }: UseRefundN
                                             `🎉 Campaign Successful - ${campaign.title}`,
                                             buildCampaignExpiredEmail(campaign.title, true, campaignUrl, campaign.image_url ?? undefined)
                                         );
-                                        
+
                                         await supabase
                                             .from('notifications')
                                             .update({ email_sent: true })
@@ -403,10 +460,10 @@ export function useRefundNotifications({ userId, address, provider }: UseRefundN
                 }
             }, 5 * 60 * 1000); // Check every 5 minutes
         }
-        
+
         startInterval();
         document.addEventListener('visibilitychange', onVisibilityChange);
-        
+
         return () => {
             cancelled = true;
             document.removeEventListener('visibilitychange', onVisibilityChange);
