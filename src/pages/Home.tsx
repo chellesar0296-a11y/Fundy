@@ -123,28 +123,6 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Stats Section */}
-      <section className="py-20 bg-muted/30">
-        <div className="container mx-auto px-4">
-          <motion.div
-            variants={staggerContainer}
-            initial="hidden"
-            whileInView="visible"
-            viewport={{ once: true, margin: '-100px' }}
-            className="grid grid-cols-1 md:grid-cols-3 gap-8"
-          >
-            {mockStats.map((stat) => (
-              <motion.div key={stat.id} variants={fadeInUp}>
-                <StatsCard
-                  title={stat.label}
-                  value={stat.value}
-                  description={stat.description}
-                />
-              </motion.div>
-            ))}
-          </motion.div>
-        </div>
-      </section>
 
       {/* Featured Campaigns */}
       <section className="py-24">
