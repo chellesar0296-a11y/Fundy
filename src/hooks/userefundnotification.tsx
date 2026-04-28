@@ -314,15 +314,17 @@ export function useRefundNotifications({ userId, address, provider }: UseRefundN
 
                     try {
                         // Check if user donated to this campaign
-                        const [ethDonated, refundable] = await Promise.all([
+                        const [ethDonated, refundable, goalReached] = await Promise.all([
                             contract.getEthDonation(campaign.on_chain_id, address),
                             contract.isRefundable(campaign.on_chain_id),
+                            contract.isGoalReached(campaign.on_chain_id), // ADD THIS CHECK
                         ]);
 
                         const hasDonated = BigInt(ethDonated) > 0n;
 
                         // ===== DONOR REFUND NOTIFICATION =====
-                        if (hasDonated && refundable) {
+                        // CRITICAL FIX: Only allow refunds if goal was NOT reached
+                        if (hasDonated && refundable && !goalReached) {
                             const donorNotified = alreadyNotified.get(campaign.id)?.has('refund_available');
                             if (!donorNotified) {
                                 const ethAmt = Number(ethers.formatEther(ethDonated)).toFixed(4);
@@ -362,9 +364,9 @@ export function useRefundNotifications({ userId, address, provider }: UseRefundN
                         // ===== ORGANIZER EXPIRY NOTIFICATION =====
                         if (campaign.organizer_id === userId) {
                             const campaignUrl = `${window.location.origin}/campaigns/${campaign.slug}`;
-                            const goalReached = await contract.isGoalReached(campaign.on_chain_id);
 
-                            if (refundable) {
+                            // Use goalReached from earlier Promise.all
+                            if (refundable && !goalReached) {
                                 // Goal not met — expired with refunds
                                 const orgNotifiedExpired = alreadyNotified.get(campaign.id)?.has('campaign_expired');
 
@@ -397,7 +399,7 @@ export function useRefundNotifications({ userId, address, provider }: UseRefundN
                                     }
                                 }
                             } else if (goalReached) {
-                                // Goal met — organizer can withdraw
+                                // Goal met — organizer can withdraw (even if expired)
                                 const orgNotifiedGoal = alreadyNotified.get(campaign.id)?.has('campaign_goal_reached');
 
                                 if (!orgNotifiedGoal) {

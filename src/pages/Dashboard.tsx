@@ -85,7 +85,7 @@ export default function Dashboard() {
   const { t } = useLanguage();
   const { user, isAuthenticated, logout, updateProfile, isLoading, refreshProfile } = useAuth();
   const { isConnected, address, provider, signer, ethBalance } = useWeb3();
-  
+
 
   useEffect(() => {
     refreshProfile?.();
@@ -111,18 +111,70 @@ export default function Dashboard() {
   const [verificationStatus, setVerificationStatus] = useState<string | null>(null);
   const [verificationRejectedReason, setVerificationRejectedReason] = useState<string | null>(null);
   const [verificationLoading, setVerificationLoading] = useState(true);
+  const [onChainCampaignStatus, setOnChainCampaignStatus] = useState<Record<number, {
+    goalReached: boolean;
+    withdrawn: boolean;
+    cancelled: boolean;
+  }>>({});
+
+  useEffect(() => {
+    if (!isConnected || !provider || onChainTxs.length === 0) return;
+
+    const fetchOnChainStatus = async () => {
+      const contract = new ethers.Contract(
+        CONTRACT_ADDRESSES.crowdfunding,
+        CROWDFUNDING_ABI,
+        provider
+      );
+
+      const uniqueCampaignIds = [...new Set(onChainTxs.map(tx => tx.campaignId))];
+      const statusMap: Record<number, { goalReached: boolean; withdrawn: boolean; cancelled: boolean }> = {};
+
+      for (const cid of uniqueCampaignIds) {
+        try {
+          // Fetch both goal status and campaign data
+          const [goalReached, campaignData] = await Promise.all([
+            contract.isGoalReached(cid),
+            contract.getCampaign(cid).catch(() => null)
+          ]);
+
+          statusMap[cid] = {
+            goalReached,
+            withdrawn: campaignData?.withdrawn || false,
+            cancelled: campaignData?.cancelled || false,
+          };
+        } catch (err) {
+          console.error(`Failed to fetch on-chain status for campaign ${cid}:`, err);
+          statusMap[cid] = { goalReached: false, withdrawn: false, cancelled: false };
+        }
+      }
+
+      setOnChainCampaignStatus(statusMap);
+    };
+
+    fetchOnChainStatus();
+  }, [isConnected, provider, onChainTxs]);
 
   const claimRefund = async (campaignId: number) => {
     if (!signer) {
       toast.error('Please connect your wallet first.');
       return;
     }
+
     try {
       const signerContract = new ethers.Contract(
         CONTRACT_ADDRESSES.crowdfunding,
         CROWDFUNDING_ABI,
         signer
       );
+
+      // First check if the goal was reached
+      const goalReached = await signerContract.isGoalReached(campaignId);
+      if (goalReached) {
+        toast.error('This campaign reached its goal! Funds cannot be refunded - they will go to the organizer.');
+        return;
+      }
+
       toast.info(`Processing refund for Campaign #${campaignId}...`);
       const tx = await signerContract.claimRefund(campaignId);
       await tx.wait();
@@ -136,6 +188,8 @@ export default function Dashboard() {
       toast.error(err?.reason ?? 'Refund failed. Please try again.');
     }
   };
+
+
 
   useEffect(() => {
     if (user) {
@@ -275,21 +329,25 @@ export default function Dashboard() {
 
           const uniqueIds = [...new Set(enriched.map((tx: any) => tx.campaignId))];
           const withdrawnMap: Record<number, boolean> = {};
+          const goalReachedMap: Record<number, boolean> = {}; // ADD THIS
+
           await Promise.all(uniqueIds.map(async (cid: any) => {
             try {
               const c = await contract.campaigns(cid);
               withdrawnMap[cid] = c.withdrawn ?? false;
+              // ADD THIS - Get actual goal reached status from contract
+              const goalReached = await contract.isGoalReached(cid);
+              goalReachedMap[cid] = goalReached;
             } catch {
               withdrawnMap[cid] = false;
+              goalReachedMap[cid] = false;
             }
           }));
 
           setOnChainTxs(enriched.map((tx: any) => ({
             ...tx,
-            withdrawn:
-              chainIdToStatus[tx.campaignId] === 'completed'
-              || withdrawnMap[tx.campaignId]
-              || false,
+            withdrawn: chainIdToStatus[tx.campaignId] === 'completed' || withdrawnMap[tx.campaignId] || false,
+            goalReached: goalReachedMap[tx.campaignId] || false, // ADD THIS
           })));
           setOnChainLoading(false);
         }
@@ -312,7 +370,7 @@ export default function Dashboard() {
       setVerificationLoading(false);
       return;
     }
-    
+
     const fetchVerificationStatus = async () => {
       try {
         const { data, error } = await supabase
@@ -322,7 +380,7 @@ export default function Dashboard() {
           .order('created_at', { ascending: false })
           .limit(1)
           .single();
-        
+
         if (error && error.code !== 'PGRST116') {
           console.error('Error fetching verification:', error);
           setVerificationStatus(null);
@@ -342,7 +400,7 @@ export default function Dashboard() {
         setVerificationLoading(false);
       }
     };
-    
+
     fetchVerificationStatus();
   }, [user?.id]);
 
@@ -451,9 +509,9 @@ export default function Dashboard() {
                   <span className="block mt-1 font-medium">Reason: {verificationRejectedReason}</span>
                 )}
               </p>
-              <Button 
-                size="sm" 
-                variant="destructive" 
+              <Button
+                size="sm"
+                variant="destructive"
                 className="mt-3 h-7 text-xs"
                 onClick={() => navigate('/verify')}
               >
@@ -852,18 +910,51 @@ export default function Dashboard() {
                                 const alreadyRefunded = onChainTxs.some(
                                   t => t.type === 'refunded' && t.campaignId === tx.campaignId
                                 );
-                                return tx.type !== 'refunded' && tx.campaignStatus === 'expired' && !alreadyRefunded ? (
-                                  <Button
-                                    size="sm"
-                                    variant="destructive"
-                                    className="text-xs h-7"
-                                    onClick={() => claimRefund(tx.campaignId)}
-                                  >
-                                    Claim Refund
-                                  </Button>
-                                ) : (
-                                  <span className="text-xs text-muted-foreground">—</span>
-                                );
+
+                                // USE the onChainCampaignStatus instead of tx.goalReached
+                                const onChainStatus = onChainCampaignStatus[tx.campaignId];
+                                const goalReached = onChainStatus?.goalReached || false;
+                                const withdrawn = onChainStatus?.withdrawn || false;
+                                const cancelled = onChainStatus?.cancelled || false;
+
+                                // Only show refund button if:
+                                // 1. It's a donation (not already refunded)
+                                // 2. Campaign is expired (from database)
+                                // 3. Not already refunded
+                                // 4. Goal was NOT reached (on-chain check)
+                                const showRefundButton = tx.type !== 'refunded' &&
+                                  tx.campaignStatus === 'expired' &&
+                                  !alreadyRefunded &&
+                                  !goalReached;
+
+                                if (showRefundButton) {
+                                  return (
+                                    <Button
+                                      size="sm"
+                                      variant="destructive"
+                                      className="text-xs h-7"
+                                      onClick={() => claimRefund(tx.campaignId)}
+                                    >
+                                      Claim Refund
+                                    </Button>
+                                  );
+                                } else if (goalReached && tx.campaignStatus === 'expired') {
+                                  return (
+                                    <div className="text-center">
+                                      <span className="text-xs text-muted-foreground block">Goal Reached</span>
+                                      <span className="text-[10px] text-muted-foreground">Funds to Organizer</span>
+                                    </div>
+                                  );
+                                } else if (withdrawn) {
+                                  return (
+                                    <div className="text-center">
+                                      <span className="text-xs text-muted-foreground block">Withdrawn</span>
+                                      <span className="text-[10px] text-muted-foreground">Funds Released</span>
+                                    </div>
+                                  );
+                                } else {
+                                  return <span className="text-xs text-muted-foreground">—</span>;
+                                }
                               })()}
                             </td>
 
