@@ -14,12 +14,15 @@ import {
   DropdownMenuTrigger, DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
 import { AuthModal } from '@/components/AuthModal';
-
 import { useWeb3 } from '@/context/Web3Context';
+
+import { NotificationBell } from '@/components/Notification';
+import { useNotifications } from '@/hooks/useNotification';
+import { useRefundNotifications } from '@/hooks/userefundnotification';
+
 interface LayoutProps {
   children: React.ReactNode;
 }
-
 
 export function Layout({ children }: LayoutProps) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -30,8 +33,17 @@ export function Layout({ children }: LayoutProps) {
 
   const { t, setLanguage, currentLanguage, languages } = useLanguage();
   const { user, isAuthenticated, logout } = useAuth();
-  const { disconnect } = useWeb3();
+  const { disconnect, provider, address } = useWeb3();
   const location = useLocation();
+
+  // ── Refund notification check on page load ────────────────
+  useRefundNotifications({
+    userId:   user?.id ?? null,
+    address,
+    provider,
+  });
+  const { notifications, markAllRead } = useNotifications(user?.id ?? null);
+
   const handleLogout = useCallback(async () => {
     try {
       await disconnect();
@@ -52,14 +64,14 @@ export function Layout({ children }: LayoutProps) {
     setIsMobileMenuOpen(false);
   }, [location]);
 
-  const openLogin = () => setAuthModal({ open: true, tab: 'login' });
+  const openLogin    = () => setAuthModal({ open: true, tab: 'login' });
   const openRegister = () => setAuthModal({ open: true, tab: 'register' });
-  const closeAuth = () => setAuthModal((s) => ({ ...s, open: false }));
+  const closeAuth    = () => setAuthModal((s) => ({ ...s, open: false }));
 
   const navLinks: { path: string; label: string; icon: React.ElementType }[] = [
-    { path: ROUTE_PATHS.HOME, label: t('nav_home'), icon: Heart },
+    { path: ROUTE_PATHS.HOME,      label: t('nav_home'),      icon: Heart },
     { path: ROUTE_PATHS.CAMPAIGNS, label: t('nav_campaigns'), icon: Flame },
-    { path: ROUTE_PATHS.ABOUT, label: t('nav_about'), icon: Info },
+    { path: ROUTE_PATHS.ABOUT,     label: t('nav_about'),     icon: Info },
   ];
 
   if (isAuthenticated) {
@@ -85,10 +97,11 @@ export function Layout({ children }: LayoutProps) {
 
       {/* Header */}
       <header
-        className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${isScrolled
+        className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
+          isScrolled
             ? 'bg-background/80 backdrop-blur-lg border-b border-border py-3'
             : 'bg-transparent py-5'
-          }`}
+        }`}
       >
         <div className="container mx-auto px-4 flex items-center justify-between">
           {/* Logo */}
@@ -108,7 +121,8 @@ export function Layout({ children }: LayoutProps) {
                 key={link.path}
                 to={link.path}
                 className={({ isActive }) =>
-                  `text-sm font-semibold transition-colors hover:text-primary ${isActive ? 'text-primary' : 'text-muted-foreground'
+                  `text-sm font-semibold transition-colors hover:text-primary ${
+                    isActive ? 'text-primary' : 'text-muted-foreground'
                   }`
                 }
               >
@@ -152,6 +166,10 @@ export function Layout({ children }: LayoutProps) {
                     </Link>
                   </Button>
                 )}
+
+                {/* ── Notification Bell ── */}
+                <NotificationBell notifications={notifications} onMarkRead={markAllRead} />
+
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="ghost" className="relative h-10 w-10 rounded-full p-0 overflow-hidden border border-border">
@@ -200,6 +218,10 @@ export function Layout({ children }: LayoutProps) {
 
           {/* Mobile Menu Toggle */}
           <div className="md:hidden flex items-center gap-2">
+            {/* ── Mobile Notification Bell (shown when logged in) ── */}
+            {isAuthenticated && (
+              <NotificationBell notifications={notifications} onMarkRead={markAllRead} />
+            )}
             <Button
               variant="ghost"
               size="icon"
@@ -236,7 +258,8 @@ export function Layout({ children }: LayoutProps) {
                   key={link.path}
                   to={link.path}
                   className={({ isActive }) =>
-                    `text-2xl font-bold flex items-center gap-4 transition-colors ${isActive ? 'text-primary' : 'text-foreground'
+                    `text-2xl font-bold flex items-center gap-4 transition-colors ${
+                      isActive ? 'text-primary' : 'text-foreground'
                     }`
                   }
                 >
@@ -308,12 +331,10 @@ export function Layout({ children }: LayoutProps) {
                 <li><Link to={ROUTE_PATHS.CREATE_CAMPAIGN} className="hover:text-primary transition-colors">Start a Campaign</Link></li>
               </ul>
             </div>
-
           </div>
 
           <div className="pt-8 border-t border-border flex flex-col md:flex-row items-center justify-between gap-4">
             <p className="text-sm text-muted-foreground">© 2026 Fundy. All rights reserved.</p>
-
           </div>
         </div>
       </footer>

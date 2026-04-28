@@ -57,6 +57,30 @@ const springTransition = {
   damping: 30
 };
 
+// ─── Shared campaign status badge ────────────────────────────────────────────
+const CAMPAIGN_STATUS_STYLES: Record<string, { pill: string; dot: string; label: string }> = {
+  active: { pill: 'bg-emerald-50 text-emerald-700 border border-emerald-200', dot: 'bg-emerald-500', label: 'Active' },
+  completed: { pill: 'bg-blue-50 text-blue-700 border border-blue-200', dot: 'bg-blue-500', label: 'Completed' },
+  expired: { pill: 'bg-amber-50 text-amber-700 border border-amber-200', dot: 'bg-amber-500', label: 'Expired' },
+  cancelled: { pill: 'bg-red-50 text-red-600 border border-red-200', dot: 'bg-red-500', label: 'Cancelled' },
+  pending: { pill: 'bg-slate-100 text-slate-600 border border-slate-200', dot: 'bg-slate-400', label: 'Pending' },
+};
+
+function CampaignStatusBadge({ status }: { status: string }) {
+  const cfg = CAMPAIGN_STATUS_STYLES[status] ?? {
+    pill: 'bg-slate-100 text-slate-600 border border-slate-200',
+    dot: 'bg-slate-400',
+    label: status,
+  };
+  return (
+    <span className={`inline-flex items-center gap-1 text-[10px] uppercase font-bold px-1.5 py-0.5 rounded-full ${cfg.pill}`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
+      {cfg.label}
+    </span>
+  );
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default function Dashboard() {
   const { t } = useLanguage();
   const { user, isAuthenticated, logout, updateProfile, isLoading, refreshProfile } = useAuth();
@@ -68,11 +92,9 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('overview');
 
-  // On-chain transactions fetched from contract events
   const [onChainTxs, setOnChainTxs] = useState<any[]>([]);
   const [onChainLoading, setOnChainLoading] = useState(false);
 
-  // ✅ All hooks MUST be called before any early returns (React rules of hooks)
   const { campaigns } = useCampaigns();
   const [userDonations, setUserDonations] = useState<any[]>([]);
   const [donationsLoading, setDonationsLoading] = useState(true);
@@ -110,6 +132,7 @@ export default function Dashboard() {
       toast.error(err?.reason ?? 'Refund failed. Please try again.');
     }
   };
+
   useEffect(() => {
     if (user) {
       setProfileName(user.name ?? '');
@@ -153,7 +176,6 @@ export default function Dashboard() {
       .finally(() => setRewardsLoading(false));
   }, [user?.id]);
 
-  // Fetch on-chain transactions for connected wallet (with retry)
   useEffect(() => {
     if (!isConnected || !address || !provider) return;
     if (CONTRACT_ADDRESSES.crowdfunding === '0x0000000000000000000000000000000000000000') return;
@@ -165,7 +187,6 @@ export default function Dashboard() {
       try {
         const contract = new ethers.Contract(CONTRACT_ADDRESSES.crowdfunding, CROWDFUNDING_ABI, provider);
 
-        // My donations (as donor)
         const donorFilter = contract.filters.DonationReceived();
         const allEvents = await contract.queryFilter(donorFilter, 0, "latest");
         const myEvents = allEvents.filter((e: any) =>
@@ -224,7 +245,6 @@ export default function Dashboard() {
           }
         }));
 
-        // Merge and sort by timestamp (newest first)
         const allTxs = [...txs, ...refundTxs].sort((a, b) => {
           if (!a.timestamp) return 1;
           if (!b.timestamp) return -1;
@@ -232,7 +252,6 @@ export default function Dashboard() {
         });
 
         if (!cancelled) {
-          // Try to match campaign title from supabase campaigns list
           const { data: campaignData } = await supabase
             .from('campaigns')
             .select('on_chain_id, title, status');
@@ -286,7 +305,6 @@ export default function Dashboard() {
     return () => { cancelled = true; };
   }, [isConnected, address, provider]);
 
-  // Early returns AFTER all hooks
   if (!isAuthenticated && !isLoading) {
     return (
       <div className="min-h-[80vh] flex flex-col items-center justify-center p-6 text-center">
@@ -327,7 +345,7 @@ export default function Dashboard() {
         animate={{ opacity: 1, y: 0 }}
         transition={springTransition}
       >
-        {/* Header Section */}
+        {/* Header */}
         <header className="flex flex-col md:flex-row items-center justify-between gap-6 mb-12">
           <div className="flex items-center gap-6">
             <Avatar className="h-24 w-24 border-4 border-primary/20">
@@ -350,7 +368,6 @@ export default function Dashboard() {
         </header>
 
         {/* Verification Banner */}
-        {/* Show verified banner if either isVerified=true OR verificationStatus=approved */}
         {(user.isVerified || user.verificationStatus === 'approved') ? (
           <div className="mb-6 flex items-center gap-4 p-4 bg-emerald-50 border border-emerald-200 rounded-xl">
             <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
@@ -401,7 +418,7 @@ export default function Dashboard() {
           />
         </div>
 
-        {/* Main Dashboard Tabs */}
+        {/* Main Tabs */}
         <Tabs defaultValue="overview" className="space-y-8" onValueChange={setActiveTab}>
           <div className="flex justify-center md:justify-start overflow-x-auto pb-2">
             <TabsList className="bg-muted/50 p-1 rounded-xl">
@@ -420,7 +437,7 @@ export default function Dashboard() {
             </TabsList>
           </div>
 
-
+          {/* ── OVERVIEW ── */}
           <TabsContent value="overview" className="mt-0">
             <motion.div
               key="overview"
@@ -430,7 +447,6 @@ export default function Dashboard() {
               transition={springTransition}
               className="grid grid-cols-1 lg:grid-cols-3 gap-8"
             >
-              {/* Recent Activities */}
               <div className="lg:col-span-2 space-y-6">
                 <div className="flex items-center justify-between">
                   <h3 className="text-xl font-bold">Recommended for You</h3>
@@ -479,7 +495,6 @@ export default function Dashboard() {
                 </Card>
               </div>
 
-              {/* Sidebar Stats/Promo */}
               <div className="space-y-6">
                 <Card className="bg-primary text-primary-foreground overflow-hidden relative">
                   <div className="absolute -right-10 -top-10 w-40 h-40 bg-white/10 rounded-full blur-3xl"></div>
@@ -496,7 +511,6 @@ export default function Dashboard() {
                   </CardFooter>
                 </Card>
 
-                {/* Rewards quick entry card - dynamic from DB */}
                 <Card className="border-amber-200 bg-amber-50/40">
                   <CardHeader className="pb-3">
                     <CardTitle className="text-base flex items-center gap-2">
@@ -538,12 +552,11 @@ export default function Dashboard() {
                     </Button>
                   </CardFooter>
                 </Card>
-
-
               </div>
             </motion.div>
           </TabsContent>
 
+          {/* ── MY CAMPAIGNS ── */}
           <TabsContent value="my-campaigns" className="mt-0">
             <motion.div
               key="my-campaigns"
@@ -584,7 +597,6 @@ export default function Dashboard() {
                   {userCampaigns.map((campaign) => {
                     const pct = Math.min(100, Math.round((campaign.currentAmount / campaign.goalAmount) * 100));
                     const daysLeft = Math.max(0, Math.ceil((new Date(campaign.endDate).getTime() - Date.now()) / 86400000));
-                    const statusColor = campaign.status === 'active' ? 'bg-emerald-100 text-emerald-700' : campaign.status === 'completed' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600';
                     return (
                       <Card key={campaign.id} className="overflow-hidden hover:shadow-md transition-shadow group">
                         <div className="relative h-40 overflow-hidden bg-muted">
@@ -594,9 +606,7 @@ export default function Dashboard() {
                             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                           />
                           <div className="absolute top-3 right-3">
-                            <span className={`text-[10px] uppercase font-bold px-2 py-1 rounded-full ${statusColor}`}>
-                              {campaign.status}
-                            </span>
+                            <CampaignStatusBadge status={campaign.status} />
                           </div>
                         </div>
                         <CardContent className="p-4 space-y-3">
@@ -615,8 +625,6 @@ export default function Dashboard() {
                               <span className="flex items-center gap-1"><Clock className="w-2.5 h-2.5" />{daysLeft}d left</span>
                             </div>
                           </div>
-
-                          {/* Action Buttons */}
                           <div className="flex gap-2 pt-1">
                             <Button variant="outline" size="sm" className="flex-1 text-xs" asChild>
                               <Link to={`/campaign/${campaign.id}`}>View</Link>
@@ -639,6 +647,7 @@ export default function Dashboard() {
             </motion.div>
           </TabsContent>
 
+          {/* ── DONATION HISTORY ── */}
           <TabsContent value="history" className="mt-0">
             <motion.div
               key="history"
@@ -646,7 +655,7 @@ export default function Dashboard() {
               animate={{ opacity: 1, y: 0 }}
               className="space-y-6"
             >
-              {/* Wallet info bar */}
+              {/* Wallet bar */}
               {isConnected && (
                 <div className="flex items-center justify-between p-4 bg-primary/5 border border-primary/20 rounded-xl">
                   <div className="flex items-center gap-3">
@@ -663,7 +672,7 @@ export default function Dashboard() {
                 </div>
               )}
 
-              {/* My Donations — what I sent to campaigns */}
+              {/* My Donations table */}
               <div className="bg-card border rounded-xl overflow-hidden">
                 <div className="p-5 border-b bg-muted/20">
                   <h3 className="font-bold text-lg flex items-center gap-2">
@@ -692,7 +701,7 @@ export default function Dashboard() {
                       <thead className="bg-muted/40 text-muted-foreground border-b">
                         <tr>
                           <th className="px-5 py-3 text-left font-medium">Date</th>
-                          <th className="px-5 py-3 text-left font-medium">Campaign #</th>
+                          <th className="px-5 py-3 text-left font-medium">Campaign</th>
                           <th className="px-5 py-3 text-left font-medium">Amount (ETH)</th>
                           <th className="px-5 py-3 text-left font-medium">FDY Earned</th>
                           <th className="px-5 py-3 text-left font-medium">Action</th>
@@ -701,40 +710,68 @@ export default function Dashboard() {
                       </thead>
                       <tbody className="divide-y">
                         {onChainTxs.map((tx) => (
-                          <tr key={tx.txHash + tx.type} className={`hover:bg-muted/30 transition-colors ${tx.type === 'refunded' ? 'bg-red-50/40' : ''}`}>
+                          <tr
+                            key={tx.txHash + tx.type}
+                            className={`hover:bg-muted/30 transition-colors ${tx.type === 'refunded' ? 'bg-emerald-50/40' : ''}`}
+                          >
                             <td className="px-5 py-3 whitespace-nowrap text-muted-foreground">
                               {tx.timestamp ? tx.timestamp.toLocaleDateString() : '—'}
                             </td>
+
+                            {/* Campaign name + tx-direction badge + campaign status badge */}
                             <td className="px-5 py-3 font-medium">
                               <p className="text-sm font-semibold">
                                 {tx.campaignTitle ?? `Campaign #${tx.campaignId}`}
                               </p>
-                              <span className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded-full ${tx.type === 'refunded'
-                                ? 'bg-red-100 text-red-600'
-                                : 'bg-emerald-100 text-emerald-700'
-                                }`}>
-                                {tx.type === 'refunded' ? '↩ Refunded' : '↑ Donated'}
-                              </span>
+                              <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                                {/* Tx direction */}
+                                <span className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded-full ${tx.type === 'refunded'
+                                  ? 'bg-emerald-100 text-emerald-700'
+                                  : 'bg-blue-100 text-blue-700'
+                                  }`}>
+                                  {tx.type === 'refunded' ? '↩ Refunded' : '↑ Donated'}
+                                </span>
+                                {/* Campaign status */}
+                                {tx.campaignStatus && (
+                                  <CampaignStatusBadge status={tx.campaignStatus} />
+                                )}
+                              </div>
                             </td>
+
                             <td className="px-5 py-3">
-                              <span className={`font-semibold ${tx.type === 'refunded' ? 'text-red-600' : ''}`}>
+                              <span className={`font-semibold ${tx.type === 'refunded' ? 'text-emerald-600' : 'text-slate-800'
+                                }`}>
                                 {tx.type === 'refunded' ? '+ ' : '- '}
                                 {Number(tx.amount).toFixed(5)} ETH
                               </span>
-                              {tx.type !== 'refunded' && (
-                                <div className="mt-1">
-                                  {tx.withdrawn ? (
+                              {tx.type !== 'refunded' && (() => {
+                                const alreadyRefunded = onChainTxs.some(
+                                  t => t.type === 'refunded' && t.campaignId === tx.campaignId
+                                );
+                                if (alreadyRefunded) return (
+                                  <div className="mt-1">
+                                    <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+                                      ↩ Refunded
+                                    </span>
+                                  </div>
+                                );
+                                if (tx.withdrawn) return (
+                                  <div className="mt-1">
                                     <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700">
                                       ✓ Funds Released
                                     </span>
-                                  ) : (
+                                  </div>
+                                );
+                                return (
+                                  <div className="mt-1">
                                     <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">
                                       ⏳ Held in Contract
                                     </span>
-                                  )}
-                                </div>
-                              )}
+                                  </div>
+                                );
+                              })()}
                             </td>
+
                             <td className="px-5 py-3">
                               {tx.type === 'refunded' ? (
                                 <span className="text-xs text-muted-foreground italic">N/A</span>
@@ -742,20 +779,27 @@ export default function Dashboard() {
                                 <p className="text-primary font-semibold">+{Number(tx.tokens).toFixed(2)} FDY</p>
                               )}
                             </td>
+
                             <td className="px-5 py-3">
-                              {tx.type !== 'refunded' && tx.campaignStatus === 'expired' ? (
-                                <Button
-                                  size="sm"
-                                  variant="destructive"
-                                  className="text-xs h-7"
-                                  onClick={() => claimRefund(tx.campaignId)}
-                                >
-                                  Claim Refund
-                                </Button>
-                              ) : (
-                                <span className="text-xs text-muted-foreground">—</span>
-                              )}
+                              {(() => {
+                                const alreadyRefunded = onChainTxs.some(
+                                  t => t.type === 'refunded' && t.campaignId === tx.campaignId
+                                );
+                                return tx.type !== 'refunded' && tx.campaignStatus === 'expired' && !alreadyRefunded ? (
+                                  <Button
+                                    size="sm"
+                                    variant="destructive"
+                                    className="text-xs h-7"
+                                    onClick={() => claimRefund(tx.campaignId)}
+                                  >
+                                    Claim Refund
+                                  </Button>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">—</span>
+                                );
+                              })()}
                             </td>
+
                             <td className="px-5 py-3">
                               <span className="font-mono text-xs text-muted-foreground" title={tx.txHash}>
                                 {tx.txHash.slice(0, 10)}...{tx.txHash.slice(-6)}
@@ -769,7 +813,7 @@ export default function Dashboard() {
                 )}
               </div>
 
-              {/* Campaigns I organised — donations received */}
+              {/* Donations Received (organiser view) */}
               {userCampaigns.length > 0 && (
                 <div className="bg-card border rounded-xl overflow-hidden">
                   <div className="p-5 border-b bg-muted/20">
@@ -779,7 +823,6 @@ export default function Dashboard() {
                     <p className="text-sm text-muted-foreground">Contributions received by your active and completed campaigns.</p>
                   </div>
                   <div className="divide-y">
-                    {/* Active/completed campaigns with donations */}
                     {userCampaigns
                       .filter(c => c.donorCount > 0 && c.status !== 'cancelled' && c.currentAmount > 0)
                       .length === 0 ? (
@@ -792,7 +835,10 @@ export default function Dashboard() {
                         .map((campaign) => (
                           <div key={campaign.id} className="p-4 flex items-center justify-between gap-4">
                             <div className="min-w-0">
-                              <p className="font-semibold text-sm line-clamp-1">{campaign.title}</p>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <p className="font-semibold text-sm line-clamp-1">{campaign.title}</p>
+                                <CampaignStatusBadge status={campaign.status} />
+                              </div>
                               <p className="text-xs text-muted-foreground mt-0.5">{campaign.donorCount} donors</p>
                             </div>
                             <div className="text-right shrink-0">
@@ -801,22 +847,18 @@ export default function Dashboard() {
                             </div>
                           </div>
                         ))
-                    )
-                    }
+                    )}
 
-                    {/* Cancelled campaigns shown separately, transparently */}
                     {userCampaigns
                       .filter(c => c.status === 'cancelled' && c.donorCount > 0)
                       .map((campaign) => (
                         <div key={campaign.id} className="p-4 flex items-center justify-between gap-4 opacity-50">
                           <div className="min-w-0">
-                            <p className="font-semibold text-sm line-clamp-1">{campaign.title}</p>
-                            <div className="flex items-center gap-2 mt-0.5">
-                              <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-600">
-                                Cancelled — Refunded
-                              </span>
-                              <p className="text-xs text-muted-foreground">{campaign.donorCount} donors refunded</p>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <p className="font-semibold text-sm line-clamp-1">{campaign.title}</p>
+                              <CampaignStatusBadge status={campaign.status} />
                             </div>
+                            <p className="text-xs text-muted-foreground mt-0.5">{campaign.donorCount} donors refunded</p>
                           </div>
                           <div className="text-right shrink-0">
                             <p className="font-bold text-muted-foreground">⟠ 0</p>
@@ -831,6 +873,7 @@ export default function Dashboard() {
             </motion.div>
           </TabsContent>
 
+          {/* ── SETTINGS ── */}
           <TabsContent value="settings" className="mt-0">
             <motion.div
               key="settings"
@@ -885,6 +928,7 @@ export default function Dashboard() {
                   </Button>
                 </CardFooter>
               </Card>
+
               <AlertDialog open={showSaveConfirm} onOpenChange={setShowSaveConfirm}>
                 <AlertDialogContent>
                   <AlertDialogHeader>
@@ -929,6 +973,7 @@ export default function Dashboard() {
             </motion.div>
           </TabsContent>
 
+          {/* ── IMPACT ── */}
           <TabsContent value="impact" className="mt-0">
             <motion.div
               key="impact"

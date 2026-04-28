@@ -26,6 +26,8 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form';
+import { useEffect } from 'react';
+import { ethers } from 'ethers';
 
 const donationSchema = z.object({
   amount: z.coerce.number().min(0.0001, { message: 'Minimum donation is 0.0001 ETH' }),
@@ -38,9 +40,10 @@ type DonationValues = z.infer<typeof donationSchema>;
 export function DonationForm({ campaign, onClose }: { campaign: Campaign; onClose?: () => void }) {
   const { t } = useLanguage();
   const { user } = useAuth();
-  const { isConnected, address, connect, donateEth, donateWithFdy, fdyBalance, refreshBalance } = useWeb3();
+  const { isConnected, address, connect, donateEth, donateWithFdy, fdyBalance, refreshBalance, provider } = useWeb3();
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [balance, setBalance] = useState("0");
   const [selectedPreset, setSelectedPreset] = useState<number | null>(null);
   const [payMethod, setPayMethod] = useState<'eth' | 'fdy'>('eth');
   const [txHash, setTxHash] = useState<string | null>(null);
@@ -57,6 +60,18 @@ export function DonationForm({ campaign, onClose }: { campaign: Campaign; onClos
   async function onSubmit(values: DonationValues) {
     if (!isConnected) {
       toast.error('Please connect your wallet first');
+      return;
+    }
+    const amountNum = Number(values.amount);
+    const balanceNum = Number(balance);
+
+    if (amountNum <= 0) {
+      toast.error("Invalid amount");
+      return;
+    }
+
+    if (amountNum > balanceNum) {
+      toast.error("Insufficient wallet balance");
       return;
     }
 
@@ -224,9 +239,14 @@ export function DonationForm({ campaign, onClose }: { campaign: Campaign; onClos
                 <FormControl>
                   <div className="relative">
                     <span className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground font-bold text-sm">⟠ </span>
-                    <Input type="number" className="pl-12 h-14 text-xl font-bold"
+                    <Input type="number" min="0.0001" step="0.001" className="pl-12 h-14 text-xl font-bold"
                       {...field}
-                      onChange={(e) => { field.onChange(e); setSelectedPreset(null); }}
+                      onChange={(e) => {
+                        let value = parseFloat(e.target.value);
+                        if (isNaN(value) || value < 0) value = 0;
+                        field.onChange(value);
+                        setSelectedPreset(null);
+                      }}
                     />
                   </div>
                 </FormControl>

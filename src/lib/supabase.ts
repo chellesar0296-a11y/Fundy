@@ -45,7 +45,7 @@ export interface DbCampaign {
   image_url: string | null;
   end_date: string;
   organizer_id: string | null;
-  status: 'active' | 'completed' | 'draft' | 'cancelled'  | 'expired';
+  status: 'active' | 'completed' | 'draft' | 'cancelled' | 'expired';
   on_chain_id: number | null;
   created_at: string;
   profiles?: DbProfile;
@@ -458,7 +458,49 @@ export async function cancelCampaignWithReason(
     .eq('id', campaignId);
   if (error) throw error;
 
-  // 2. Send email via Supabase Edge Function
+  // 2. Get organizer_id
+  const { data: campaign } = await supabase
+    .from('campaigns')
+    .select('organizer_id')
+    .eq('id', campaignId)
+    .single();
+
+  // 3. In-app notify organizer
+  if (campaign?.organizer_id) {
+    await supabase.from('notifications').insert({
+      user_id: campaign.organizer_id,
+      type: 'campaign_cancelled',
+      title: 'Your Campaign Was Cancelled',
+      message: `"${campaignTitle}" has been cancelled by an admin. Reason: ${reason}`,
+      campaign_id: campaignId,
+      is_read: false,
+      email_sent: false,
+    });
+  }
+
+  // 4. In-app notify all donors
+  const { data: donations } = await supabase
+    .from('donations')
+    .select('donor_id')
+    .eq('campaign_id', campaignId)
+    .not('donor_id', 'is', null);
+
+  if (donations?.length) {
+    const uniqueDonorIds = [...new Set(donations.map((d: any) => d.donor_id))];
+    await supabase.from('notifications').insert(
+      uniqueDonorIds.map((donorId) => ({
+        user_id: donorId,
+        type: 'campaign_cancelled',
+        title: 'Campaign Cancelled',
+        message: `The campaign "${campaignTitle}" was cancelled by an admin. Your donation has been automatically refunded to your wallet.`,
+        campaign_id: campaignId,
+        is_read: false,
+        email_sent: false,
+      }))
+    );
+  }
+
+  // 5. Email organizer (existing)
   try {
     await supabase.functions.invoke('send-email', {
       body: {
@@ -479,7 +521,6 @@ export async function cancelCampaignWithReason(
       },
     });
   } catch (emailErr) {
-    // Email failure should not block the cancel action
     console.error('[send-email] failed:', emailErr);
   }
 }
@@ -595,15 +636,57 @@ export async function processCancelRequest(
     .eq('id', requestId);
   if (reqErr) throw reqErr;
 
+  // Get organizer_id
+  const { data: campaign } = await supabase
+    .from('campaigns')
+    .select('organizer_id')
+    .eq('id', campaignId)
+    .single();
+
   if (action === 'approved') {
-    // Mark campaign as cancelled in DB
+    // Mark campaign as cancelled
     const { error: campErr } = await supabase
       .from('campaigns')
       .update({ status: 'cancelled', updated_at: new Date().toISOString() })
       .eq('id', campaignId);
     if (campErr) throw campErr;
 
-    // Notify organizer
+    // In-app notify organizer (approved)
+    if (campaign?.organizer_id && campaignTitle) {
+      await supabase.from('notifications').insert({
+        user_id: campaign.organizer_id,
+        type: 'campaign_cancelled',
+        title: 'Your Campaign Was Cancelled',
+        message: `The campaign "${campaignTitle}" was cancelled by the Admin.`,
+        campaign_id: campaignId,
+        is_read: false,
+        email_sent: false,
+      });
+    }
+
+    // In-app notify all donors (refund available)
+    const { data: donations } = await supabase
+      .from('donations')
+      .select('donor_id')
+      .eq('campaign_id', campaignId)
+      .not('donor_id', 'is', null);
+
+    if (donations?.length && campaignTitle) {
+      const uniqueDonorIds = [...new Set(donations.map((d: any) => d.donor_id))];
+      await supabase.from('notifications').insert(
+        uniqueDonorIds.map((donorId) => ({
+          user_id: donorId,
+          type: 'campaign_cancelled',
+          title: 'Campaign Cancelled',
+          message: `The campaign "${campaignTitle}" was cancelled. Your donation has been automatically refunded to your wallet.`,
+          campaign_id: campaignId,
+          is_read: false,
+          email_sent: false,
+        }))
+      );
+    }
+
+    // Email organizer (existing)
     if (organizerEmail && campaignTitle) {
       try {
         await supabase.functions.invoke('send-email', {
@@ -625,8 +708,22 @@ export async function processCancelRequest(
         console.error('[send-email] failed:', emailErr);
       }
     }
+
   } else {
-    // Notify organizer of rejection
+    // In-app notify organizer (rejected)
+    if (campaign?.organizer_id && campaignTitle) {
+      await supabase.from('notifications').insert({
+        user_id: campaign.organizer_id,
+        type: 'campaign_cancelled',
+        title: 'Cancellation Request Rejected',
+        message: `Your request to cancel "${campaignTitle}" was rejected.${adminNote ? ' Reason: ' + adminNote : ''}`,
+        campaign_id: campaignId,
+        is_read: false,
+        email_sent: false,
+      });
+    }
+
+    // Email organizer (existing)
     if (organizerEmail && campaignTitle) {
       try {
         await supabase.functions.invoke('send-email', {

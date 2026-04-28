@@ -35,6 +35,10 @@ remain:
 
 >>>>>>> 3f0d5b1934790b8867ae3c651e5c091c0012ab09
 
+for the testing expired run below code
+node scripts/simulate-expiry.mjs <campaign-id(get from supabase)>
+example only dont use:
+node scripts/simulate-expiry.mjs 5bd0aaf0-c818-4a3a-ac97-f26f4632b562
 
 
 
