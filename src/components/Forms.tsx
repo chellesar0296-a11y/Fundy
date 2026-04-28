@@ -48,11 +48,11 @@ export function DonationForm({ campaign, onClose }: { campaign: Campaign; onClos
   const [payMethod, setPayMethod] = useState<'eth' | 'fdy'>('eth');
   const [txHash, setTxHash] = useState<string | null>(null);
   useEffect(() => {
-  if (!isConnected || !address || !provider) return;
-  provider.getBalance(address).then((bal) => {
-    setBalance(ethers.formatEther(bal));
-  });
-}, [isConnected, address, provider]);
+    if (!isConnected || !address || !provider) return;
+    provider.getBalance(address).then((bal) => {
+      setBalance(ethers.formatEther(bal));
+    });
+  }, [isConnected, address, provider]);
 
   const isOwnCampaign = !!user && user.id === campaign.organizer.id;
 
@@ -245,12 +245,16 @@ export function DonationForm({ campaign, onClose }: { campaign: Campaign; onClos
                 <FormControl>
                   <div className="relative">
                     <span className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground font-bold text-sm">⟠ </span>
-                    <Input type="number" min="0.0001" step="0.001" className="pl-12 h-14 text-xl font-bold"
+                    <Input
+                      type="number"
+                      min="0.0001"
+                      step="any"         
+                      className="pl-12 h-14 text-xl font-bold"
                       {...field}
                       onChange={(e) => {
-                        let value = parseFloat(e.target.value);
-                        if (isNaN(value) || value < 0) value = 0;
-                        field.onChange(value);
+                        const raw = e.target.value;
+                        const value = parseFloat(raw);
+                        field.onChange(isNaN(value) ? 0 : value);
                         setSelectedPreset(null);
                       }}
                     />
