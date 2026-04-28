@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Menu, X, Globe, LogOut, User as UserIcon, ChevronDown,
-  Heart, LayoutDashboard, Info, Flame, Plus, Gift, ShieldAlert, Wallet
+  Heart, LayoutDashboard, Info, Flame, Plus, Gift, ShieldAlert, Wallet, Loader2
 } from 'lucide-react';
 import { ROUTE_PATHS, LanguageCode } from '@/lib/index';
 import { useLanguage } from '@/hooks/useLanguage';
@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { AuthModal } from '@/components/AuthModal';
 import { useWeb3 } from '@/context/Web3Context';
+import { toast } from 'sonner';
 
 import { NotificationBell } from '@/components/Notification';
 import { useNotifications } from '@/hooks/useNotification';
@@ -30,29 +31,141 @@ export function Layout({ children }: LayoutProps) {
   const [authModal, setAuthModal] = useState<{ open: boolean; tab: 'login' | 'register' }>({
     open: false, tab: 'login',
   });
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   const { t, setLanguage, currentLanguage, languages } = useLanguage();
   const { user, isAuthenticated, logout } = useAuth();
   const { disconnect, provider, address } = useWeb3();
   const location = useLocation();
+  
+  // Refs to prevent multiple logout attempts
+  const logoutInProgressRef = useRef(false);
+  const logoutTimeoutRef = useRef<NodeJS.Timeout>();
 
   // ── Refund notification check on page load ────────────────
   useRefundNotifications({
-    userId:   user?.id ?? null,
+    userId: user?.id ?? null,
     address,
     provider,
   });
   const { notifications, markAllRead } = useNotifications(user?.id ?? null);
 
+  // Check if user is admin
+  const isAdmin = user?.role === 'admin';
+
+  // Improved logout handler with better error handling and state management
   const handleLogout = useCallback(async () => {
-    try {
-      await disconnect();
-    } catch (err) {
-      console.warn('Web3 disconnect error:', err);
-    } finally {
-      logout();
+    // Prevent multiple simultaneous logout attempts
+    if (logoutInProgressRef.current || isLoggingOut) {
+      console.log('Logout already in progress, ignoring request');
+      toast.info('Logout already in progress...');
+      return;
     }
-  }, [disconnect, logout]);
+
+    // Set timeout to prevent infinite hanging
+    logoutTimeoutRef.current = setTimeout(() => {
+      if (logoutInProgressRef.current || isLoggingOut) {
+        console.error('Logout timeout - forcing reset');
+        logoutInProgressRef.current = false;
+        setIsLoggingOut(false);
+        toast.error('Logout timed out. Please refresh the page.');
+      }
+    }, 10000);
+
+    logoutInProgressRef.current = true;
+    setIsLoggingOut(true);
+
+    try {
+      // Step 1: Disconnect Web3 if connected
+      if (disconnect) {
+        try {
+          await Promise.race([
+            disconnect(),
+            new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('Web3 disconnect timeout')), 5000)
+            )
+          ]);
+        } catch (web3Err) {
+          console.warn('Web3 disconnect error (non-critical):', web3Err);
+          // Don't throw - continue with auth logout even if web3 disconnect fails
+        }
+      }
+
+      // Step 2: Clear any pending notifications or subscriptions
+      if (markAllRead) {
+        try {
+          await Promise.race([
+            markAllRead(),
+            new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('Mark read timeout')), 3000)
+            )
+          ]);
+        } catch (notifErr) {
+          console.warn('Error clearing notifications (non-critical):', notifErr);
+        }
+      }
+
+      // Step 3: Clear any stored data
+      try {
+        localStorage.removeItem('supabase.auth.token');
+        sessionStorage.removeItem('supabase.auth.token');
+      } catch (storageErr) {
+        console.warn('Error clearing storage (non-critical):', storageErr);
+      }
+
+      // Step 4: Perform auth logout
+      await Promise.race([
+        logout(),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Auth logout timeout')), 5000)
+        )
+      ]);
+
+      // Step 5: Close mobile menu if open
+      setIsMobileMenuOpen(false);
+
+      // Step 6: Show success message
+      toast.success('Successfully logged out');
+
+    } catch (err: any) {
+      console.error('Logout error:', err);
+      
+      // Even if there's an error, we should try to clear local state
+      try {
+        // Force clear local storage
+        localStorage.removeItem('supabase.auth.token');
+        sessionStorage.removeItem('supabase.auth.token');
+        
+        // Force logout from auth context
+        await logout();
+        
+        toast.warning('Logged out with some issues. Please refresh the page if needed.');
+      } catch (finalErr) {
+        console.error('Final logout attempt failed:', finalErr);
+        toast.error('Failed to logout. Please try refreshing the page.');
+      }
+    } finally {
+      // Clear timeout
+      if (logoutTimeoutRef.current) {
+        clearTimeout(logoutTimeoutRef.current);
+      }
+      
+      // Reset state after delay to prevent immediate re-attempts
+      setTimeout(() => {
+        logoutInProgressRef.current = false;
+        setIsLoggingOut(false);
+      }, 500);
+    }
+  }, [disconnect, logout, markAllRead, isLoggingOut]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (logoutTimeoutRef.current) {
+        clearTimeout(logoutTimeoutRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const handleScroll = () => setIsScrolled(window.scrollY > 20);
@@ -64,22 +177,22 @@ export function Layout({ children }: LayoutProps) {
     setIsMobileMenuOpen(false);
   }, [location]);
 
-  const openLogin    = () => setAuthModal({ open: true, tab: 'login' });
+  const openLogin = () => setAuthModal({ open: true, tab: 'login' });
   const openRegister = () => setAuthModal({ open: true, tab: 'register' });
-  const closeAuth    = () => setAuthModal((s) => ({ ...s, open: false }));
+  const closeAuth = () => setAuthModal((s) => ({ ...s, open: false }));
 
   const navLinks: { path: string; label: string; icon: React.ElementType }[] = [
-    { path: ROUTE_PATHS.HOME,      label: t('nav_home'),      icon: Heart },
+    { path: ROUTE_PATHS.HOME, label: t('nav_home'), icon: Heart },
     { path: ROUTE_PATHS.CAMPAIGNS, label: t('nav_campaigns'), icon: Flame },
-    { path: ROUTE_PATHS.ABOUT,     label: t('nav_about'),     icon: Info },
+    { path: ROUTE_PATHS.ABOUT, label: t('nav_about'), icon: Info },
   ];
 
   if (isAuthenticated) {
     navLinks.push({ path: ROUTE_PATHS.DASHBOARD, label: t('nav_dashboard'), icon: LayoutDashboard });
-    if (user?.role !== 'admin') {
+    if (!isAdmin) {
       navLinks.push({ path: '/rewards', label: 'Rewards', icon: Gift });
     }
-    if (user?.role === 'admin') {
+    if (isAdmin) {
       navLinks.push({ path: '/admin', label: 'Admin', icon: ShieldAlert });
     }
   }
@@ -159,7 +272,8 @@ export function Layout({ children }: LayoutProps) {
             {/* Auth */}
             {isAuthenticated ? (
               <>
-                {user?.role !== 'admin' && (
+                {/* Only show Start Campaign button for non-admin users */}
+                {!isAdmin && (
                   <Button asChild variant="outline" size="sm" className="gap-2">
                     <Link to={ROUTE_PATHS.CREATE_CAMPAIGN}>
                       <Plus className="w-4 h-4" /> Start Campaign
@@ -167,12 +281,16 @@ export function Layout({ children }: LayoutProps) {
                   </Button>
                 )}
 
-                {/* ── Notification Bell ── */}
+                {/* Notification Bell */}
                 <NotificationBell notifications={notifications} onMarkRead={markAllRead} />
 
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" className="relative h-10 w-10 rounded-full p-0 overflow-hidden border border-border">
+                    <Button 
+                      variant="ghost" 
+                      className="relative h-10 w-10 rounded-full p-0 overflow-hidden border border-border"
+                      disabled={isLoggingOut}
+                    >
                       {user?.avatar ? (
                         <img src={user.avatar} alt={user.name} className="h-full w-full object-cover" />
                       ) : (
@@ -194,16 +312,32 @@ export function Layout({ children }: LayoutProps) {
                         <span>{t('nav_dashboard')}</span>
                       </Link>
                     </DropdownMenuItem>
-                    <DropdownMenuItem asChild>
-                      <Link to={ROUTE_PATHS.CREATE_CAMPAIGN} className="cursor-pointer">
-                        <Plus className="mr-2 h-4 w-4" />
-                        <span>Start Campaign</span>
-                      </Link>
-                    </DropdownMenuItem>
+                    {/* Only show Start Campaign in dropdown for non-admin users */}
+                    {!isAdmin && (
+                      <DropdownMenuItem asChild>
+                        <Link to={ROUTE_PATHS.CREATE_CAMPAIGN} className="cursor-pointer">
+                          <Plus className="mr-2 h-4 w-4" />
+                          <span>Start Campaign</span>
+                        </Link>
+                      </DropdownMenuItem>
+                    )}
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={handleLogout} className="cursor-pointer text-destructive focus:text-destructive">
-                      <LogOut className="mr-2 h-4 w-4" />
-                      <span>Logout</span>
+                    <DropdownMenuItem 
+                      onClick={handleLogout} 
+                      className={`cursor-pointer text-destructive focus:text-destructive ${isLoggingOut ? 'opacity-50 pointer-events-none' : ''}`}
+                      disabled={isLoggingOut}
+                    >
+                      {isLoggingOut ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          <span>Logging out...</span>
+                        </>
+                      ) : (
+                        <>
+                          <LogOut className="mr-2 h-4 w-4" />
+                          <span>Logout</span>
+                        </>
+                      )}
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -218,7 +352,7 @@ export function Layout({ children }: LayoutProps) {
 
           {/* Mobile Menu Toggle */}
           <div className="md:hidden flex items-center gap-2">
-            {/* ── Mobile Notification Bell (shown when logged in) ── */}
+            {/* Mobile Notification Bell (shown when logged in) */}
             {isAuthenticated && (
               <NotificationBell notifications={notifications} onMarkRead={markAllRead} />
             )}
@@ -227,6 +361,7 @@ export function Layout({ children }: LayoutProps) {
               size="icon"
               onClick={() => setLanguage(currentLanguage.code === 'en' ? 'es' : currentLanguage.code === 'es' ? 'fr' : 'en')}
               className="text-lg"
+              disabled={isLoggingOut}
             >
               {currentLanguage.flag}
             </Button>
@@ -235,6 +370,7 @@ export function Layout({ children }: LayoutProps) {
               size="icon"
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
               className="relative z-50"
+              disabled={isLoggingOut}
             >
               {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
             </Button>
@@ -244,7 +380,7 @@ export function Layout({ children }: LayoutProps) {
 
       {/* Mobile Menu */}
       <AnimatePresence>
-        {isMobileMenuOpen && (
+        {isMobileMenuOpen && !isLoggingOut && (
           <motion.div
             initial={{ opacity: 0, x: '100%' }}
             animate={{ opacity: 1, x: 0 }}
@@ -267,7 +403,8 @@ export function Layout({ children }: LayoutProps) {
                   {link.label}
                 </NavLink>
               ))}
-              {isAuthenticated && (
+              {/* Only show Start Campaign in mobile menu for non-admin users */}
+              {isAuthenticated && !isAdmin && (
                 <Link to={ROUTE_PATHS.CREATE_CAMPAIGN} className="text-2xl font-bold flex items-center gap-4 text-foreground">
                   <Plus className="w-6 h-6" /> Start Campaign
                 </Link>
@@ -278,16 +415,33 @@ export function Layout({ children }: LayoutProps) {
               {isAuthenticated ? (
                 <div className="space-y-4">
                   <div className="flex items-center gap-4 p-4 rounded-2xl bg-muted">
-                    <div className="h-12 w-12 rounded-full overflow-hidden">
-                      <img src={user?.avatar} alt={user?.name} />
+                    <div className="h-12 w-12 rounded-full overflow-hidden bg-primary/20 flex items-center justify-center">
+                      {user?.avatar ? (
+                        <img src={user.avatar} alt={user?.name} className="h-full w-full object-cover" />
+                      ) : (
+                        <UserIcon className="h-6 w-6 text-primary" />
+                      )}
                     </div>
                     <div>
                       <p className="font-bold">{user?.name}</p>
                       <p className="text-xs text-muted-foreground">{user?.email}</p>
                     </div>
                   </div>
-                  <Button variant="outline" className="w-full justify-start h-12 text-destructive" onClick={handleLogout}>
-                    <LogOut className="mr-2 h-5 w-5" /> Logout
+                  <Button 
+                    variant="outline" 
+                    className="w-full justify-start h-12 text-destructive" 
+                    onClick={handleLogout}
+                    disabled={isLoggingOut}
+                  >
+                    {isLoggingOut ? (
+                      <>
+                        <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Logging out...
+                      </>
+                    ) : (
+                      <>
+                        <LogOut className="mr-2 h-5 w-5" /> Logout
+                      </>
+                    )}
                   </Button>
                 </div>
               ) : (
@@ -304,6 +458,16 @@ export function Layout({ children }: LayoutProps) {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Loading Overlay (optional - shows during logout) */}
+      {isLoggingOut && (
+        <div className="fixed inset-0 z-50 bg-background/50 backdrop-blur-sm flex items-center justify-center pointer-events-none">
+          <div className="bg-card rounded-lg p-6 shadow-lg flex items-center gap-3 pointer-events-auto">
+            <Loader2 className="w-6 h-6 animate-spin text-primary" />
+            <span className="font-medium">Logging out...</span>
+          </div>
+        </div>
+      )}
 
       {/* Main Content */}
       <main className="flex-grow pt-24">{children}</main>
