@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { fetchCampaigns, fetchCampaignById, DbCampaign, supabase } from '@/lib/supabase';
 import { Campaign } from '@/lib/index';
+import { ethers } from 'ethers';
+import { CROWDFUNDING_ABI, CONTRACT_ADDRESSES } from '@/context/Web3Context';
 
 // Map DB row to frontend Campaign type
 export function dbCampaignToFrontend(c: DbCampaign): Campaign {
@@ -27,6 +29,40 @@ export function dbCampaignToFrontend(c: DbCampaign): Campaign {
   };
 }
 
+// ── Helper: silently mark a campaign expired in Supabase ──────
+async function markCampaignExpired(campaignId: string) {
+  try {
+    await supabase
+      .from('campaigns')
+      .update({ status: 'expired' })
+      .eq('id', campaignId);
+    console.log(`[useCampaign] Campaign ${campaignId} marked as expired`);
+  } catch (err) {
+    console.error('[useCampaign] Failed to mark expired:', err);
+  }
+}
+
+// ── Helper: check on-chain if goal was reached ────────────────
+async function isGoalReachedOnChain(onChainId: number): Promise<boolean> {
+  try {
+    // Use window.ethereum if available (read-only check, no wallet needed)
+    const ethereum = (window as any).ethereum;
+    if (!ethereum) return false;
+
+    const provider = new ethers.BrowserProvider(ethereum);
+    const contract = new ethers.Contract(
+      CONTRACT_ADDRESSES.crowdfunding,
+      CROWDFUNDING_ABI,
+      provider
+    );
+
+    const c = await contract.getCampaign(onChainId);
+    return (c.totalRaisedEth + c.totalRaisedFdy) >= c.goalAmount;
+  } catch {
+    return false; // if chain unreachable, assume not reached → mark expired
+  }
+}
+
 export function useCampaigns() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -44,7 +80,32 @@ export function useCampaigns() {
 
     fetchCampaigns()
       .then((data) => {
-        if (!stale) setCampaigns(data.map(dbCampaignToFrontend));
+        if (!stale) {
+          const mapped = data.map(dbCampaignToFrontend);
+          setCampaigns(mapped);
+
+          // ── Check each active campaign for expiry ──────────
+          const now = new Date();
+          mapped.forEach(async (campaign) => {
+            if (campaign.status !== 'active') return;
+            if (now < new Date(campaign.endDate)) return; // not expired yet
+
+            // Past deadline — check on-chain goal before marking expired
+            if (campaign.onChainId) {
+              const goalReached = await isGoalReachedOnChain(campaign.onChainId);
+              if (goalReached) return; // organizer still needs to withdraw
+            }
+
+            await markCampaignExpired(campaign.id);
+
+            // Update local state so UI reflects immediately without refetch
+            if (!stale) {
+              setCampaigns(prev =>
+                prev.map(c => c.id === campaign.id ? { ...c, status: 'expired' } : c)
+              );
+            }
+          });
+        }
       })
       .catch((err) => {
         if (!stale) {
@@ -97,9 +158,29 @@ export function useCampaign(id: string) {
         .eq('campaign_id', id)
         .order('min_amount', { ascending: true }),
     ])
-      .then(([campaignData, { data: tiers, error: tiersError }]) => {
+      .then(async ([campaignData, { data: tiers, error: tiersError }]) => {
+        if (stale) return;
+
+        const mapped = dbCampaignToFrontend(campaignData);
+
+        // ── Expiry check for this single campaign ─────────────
+        if (mapped.status === 'active' && new Date() >= new Date(mapped.endDate)) {
+          let shouldMarkExpired = true;
+
+          if (mapped.onChainId) {
+            const goalReached = await isGoalReachedOnChain(mapped.onChainId);
+            if (goalReached) shouldMarkExpired = false; // awaiting organizer withdrawal
+          }
+
+          if (shouldMarkExpired && !stale) {
+            await markCampaignExpired(mapped.id);
+            mapped.status = 'expired'; // update local object immediately
+          }
+        }
+        // ─────────────────────────────────────────────────────
+
         if (!stale) {
-          setCampaign(dbCampaignToFrontend(campaignData));
+          setCampaign(mapped);
 
           if (tiersError) {
             console.error('[useCampaign] reward_tiers error:', tiersError.message);

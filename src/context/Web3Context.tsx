@@ -3,8 +3,8 @@ import { ethers } from 'ethers';
 import { supabase } from '@/lib/supabase';
 
 export const CONTRACT_ADDRESSES = {
-  crowdfunding: '0xD0F376ca37bd147c2919C25Ab8e22943871Af77d',
-  token:        '0x3561e0757876Da64f3E05Ad1DeFc0697Ab1f27Fe',
+  crowdfunding: '0xea3b7ff55dba587d6f0e56c5678b1E1A5E531b77',
+  token:        '0xd45959D01052CFDD4D115892043a40c0B51Fdf3b',
 };
 
 export const CROWDFUNDING_ABI = [

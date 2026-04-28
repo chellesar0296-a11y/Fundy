@@ -39,7 +39,7 @@ export interface Campaign {
     avatar?: string;
     isVerified: boolean;
   };
-  status: 'active' | 'completed' | 'draft' | 'cancelled';
+  status: 'active' | 'completed' | 'draft' | 'cancelled' | 'expired';
 }
 
 export interface Donation {

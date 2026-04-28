@@ -60,7 +60,7 @@ const springTransition = {
 export default function Dashboard() {
   const { t } = useLanguage();
   const { user, isAuthenticated, logout, updateProfile, isLoading, refreshProfile } = useAuth();
-  const { isConnected, address, provider, fdyBalance, ethBalance } = useWeb3();
+  const { isConnected, address, provider, signer, fdyBalance, ethBalance } = useWeb3();
 
   useEffect(() => {
     refreshProfile?.();
@@ -86,6 +86,30 @@ export default function Dashboard() {
   const [userRewards, setUserRewards] = useState<(DbReward & { campaigns: { title: string } })[]>([]);
   const [rewardsLoading, setRewardsLoading] = useState(true);
 
+  const claimRefund = async (campaignId: number) => {
+    if (!signer) {
+      toast.error('Please connect your wallet first.');
+      return;
+    }
+    try {
+      const signerContract = new ethers.Contract(
+        CONTRACT_ADDRESSES.crowdfunding,
+        CROWDFUNDING_ABI,
+        signer
+      );
+      toast.info(`Processing refund for Campaign #${campaignId}...`);
+      const tx = await signerContract.claimRefund(campaignId);
+      await tx.wait();
+      toast.success('Refund claimed successfully!');
+      setOnChainTxs(prev => prev.map(t =>
+        t.campaignId === campaignId && t.type === 'donated'
+          ? { ...t, type: 'refunded' }
+          : t
+      ));
+    } catch (err: any) {
+      toast.error(err?.reason ?? 'Refund failed. Please try again.');
+    }
+  };
   useEffect(() => {
     if (user) {
       setProfileName(user.name ?? '');
@@ -225,6 +249,7 @@ export default function Dashboard() {
           const enriched = allTxs.map(tx => ({
             ...tx,
             campaignTitle: chainIdToTitle[tx.campaignId] ?? null,
+            campaignStatus: chainIdToStatus[tx.campaignId] ?? null,
           }));
 
           const uniqueIds = [...new Set(enriched.map((tx: any) => tx.campaignId))];
@@ -670,6 +695,7 @@ export default function Dashboard() {
                           <th className="px-5 py-3 text-left font-medium">Campaign #</th>
                           <th className="px-5 py-3 text-left font-medium">Amount (ETH)</th>
                           <th className="px-5 py-3 text-left font-medium">FDY Earned</th>
+                          <th className="px-5 py-3 text-left font-medium">Action</th>
                           <th className="px-5 py-3 text-left font-medium">Tx Hash</th>
                         </tr>
                       </thead>
@@ -695,13 +721,8 @@ export default function Dashboard() {
                                 {tx.type === 'refunded' ? '+ ' : '- '}
                                 {Number(tx.amount).toFixed(5)} ETH
                               </span>
-                            </td>
-                            <td className="px-5 py-3">
-                              {tx.type === 'refunded' ? (
-                                <span className="text-xs text-muted-foreground italic">Campaign cancelled</span>
-                              ) : (
-                                <div className="space-y-1">
-                                  <p className="text-primary font-semibold">+{Number(tx.tokens).toFixed(2)} FDY</p>
+                              {tx.type !== 'refunded' && (
+                                <div className="mt-1">
                                   {tx.withdrawn ? (
                                     <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700">
                                       ✓ Funds Released
@@ -712,6 +733,27 @@ export default function Dashboard() {
                                     </span>
                                   )}
                                 </div>
+                              )}
+                            </td>
+                            <td className="px-5 py-3">
+                              {tx.type === 'refunded' ? (
+                                <span className="text-xs text-muted-foreground italic">N/A</span>
+                              ) : (
+                                <p className="text-primary font-semibold">+{Number(tx.tokens).toFixed(2)} FDY</p>
+                              )}
+                            </td>
+                            <td className="px-5 py-3">
+                              {tx.type !== 'refunded' && tx.campaignStatus === 'expired' ? (
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  className="text-xs h-7"
+                                  onClick={() => claimRefund(tx.campaignId)}
+                                >
+                                  Claim Refund
+                                </Button>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">—</span>
                               )}
                             </td>
                             <td className="px-5 py-3">

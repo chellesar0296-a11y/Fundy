@@ -45,7 +45,7 @@ export interface DbCampaign {
   image_url: string | null;
   end_date: string;
   organizer_id: string | null;
-  status: 'active' | 'completed' | 'draft' | 'cancelled';
+  status: 'active' | 'completed' | 'draft' | 'cancelled'  | 'expired';
   on_chain_id: number | null;
   created_at: string;
   profiles?: DbProfile;
