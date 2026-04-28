@@ -1,9 +1,9 @@
-// Rewards.tsx - 简化可靠版
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   Coins, Loader2, ArrowDownLeft, ArrowUpRight,
   Gift, RefreshCw, Wallet, TrendingUp, BarChart3,
+  Copy, ExternalLink,
 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useNavigate } from 'react-router-dom';
@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { toast } from 'sonner';
 
 // ── Types ──────────────────────────────────────────────────────
 type TxType = 'auto_reward' | 'extra_reward' | 'transferred_out' | 'transferred_in';
@@ -45,6 +46,36 @@ interface StakePosition {
   balance: number;
   totalSupply: number;
   stakePct: string;
+}
+
+
+async function addTokenToMetaMask(tokenAddress: string, tokenSymbol: string, decimals: number = 18) {
+  if (!window.ethereum) {
+    toast.error('MetaMask not detected. Please install MetaMask first.');
+    return false;
+  }
+  try {
+    await window.ethereum.request({
+      method: 'wallet_watchAsset',
+      params: {
+        type: 'ERC20',
+        options: {
+          address: tokenAddress,
+          symbol: tokenSymbol,
+          decimals: decimals,
+        },
+      },
+    });
+    toast.success(`${tokenSymbol} added to MetaMask!`);
+    return true;
+  } catch (err: any) {
+    if (err.code === 4001) {
+      toast.error('User rejected the request.');
+    } else {
+      toast.error('Failed to add token to MetaMask');
+    }
+    return false;
+  }
 }
 
 // ── useMyStakes hook ──────────────────────────────────────────
@@ -122,83 +153,137 @@ function useMyStakes(address: string | null, provider: ethers.BrowserProvider | 
   return { stakes, totalFdy, loading };
 }
 
-// ── History Hook - 从 Supabase 捐款记录生成 ─────────────────────
-function useDonationHistory(userId: string | undefined) {
+// ── History Hook - reads on-chain FundsWithdrawn + ERC20 Transfer events ──
+function useDonationHistory(
+  address: string | null,
+  provider: ethers.BrowserProvider | null,
+  stakes: StakePosition[],
+) {
   const [history, setHistory] = useState<HistoryTx[]>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!userId) { setHistory([]); return; }
+    if (!address || !provider || stakes.length === 0) {
+      setHistory([]);
+      return;
+    }
 
     let cancelled = false;
     setLoading(true);
 
     (async () => {
       try {
-        // 获取用户的所有捐款记录
-        const { data: donations, error } = await supabase
-          .from('donations')
-          .select(`
-            amount,
-            created_at,
-            tx_hash,
-            campaign:campaigns (
-              id,
-              title,
-              on_chain_id
-            )
-          `)
-          .eq('donor_id', userId)
-          .order('created_at', { ascending: false });
+        const entries: HistoryTx[] = [];
 
-        if (error) throw error;
+        const ERC20_ABI = [
+          'event Transfer(address indexed from, address indexed to, uint256 value)',
+          'function symbol() view returns (string)',
+        ];
+        const ZERO = ethers.ZeroAddress;
 
-        const historyEntries: HistoryTx[] = [];
+        const cfContract = new ethers.Contract(
+          CONTRACT_ADDRESSES.crowdfunding,
+          CROWDFUNDING_ABI,
+          provider,
+        );
 
-        for (const d of donations || []) {
-          const campaign = d.campaign;
-          if (!campaign) continue;
+        for (const stake of stakes) {
+          const token = new ethers.Contract(stake.tokenAddress, ERC20_ABI, provider);
 
-          const amountEth = d.amount;
-          // Auto reward: 1 ETH = 100 tokens
-          const autoAmount = amountEth * 100;
+          // ── 1. Minted-to-user (auto + extra) via Transfer(0x0 → user) ──
+          const mintFilter = token.filters.Transfer(ZERO, address);
+          const mintLogs = await token.queryFilter(mintFilter, 0, 'latest');
 
-          // 获取 campaign 的 extra 配置来判断是否有 extra reward
-          // 简化处理：如果捐款金额 >= 1 ETH，可能有 extra，但需要查询链上
-          // 这里先只显示 auto reward
-          
-          historyEntries.push({
-            type: 'auto_reward',
-            amount: autoAmount,
-            amountDisplay: '',
-            campaignId: campaign.on_chain_id || campaign.id,
-            campaignTitle: campaign.title,
-            tokenSymbol: `FDY-${campaign.on_chain_id || campaign.id}`,
-            txHash: d.tx_hash || undefined,
-            date: new Date(d.created_at),
-          });
+          for (const log of mintLogs) {
+            const parsed = log as ethers.EventLog;
+            const amount = Number(ethers.formatEther(parsed.args.value));
+            const block = await parsed.getBlock();
+            const date = new Date(block!.timestamp * 1000);
+            const txHash = parsed.transactionHash;
+
+            // Check corresponding FundsWithdrawn to split auto vs extra
+            let isExtra = false;
+            const receipt = await provider.getTransactionReceipt(txHash);
+            if (receipt) {
+              const iface = new ethers.Interface(CROWDFUNDING_ABI);
+              for (const rlog of receipt.logs) {
+                try {
+                  const p = iface.parseLog({ topics: [...rlog.topics], data: rlog.data });
+                  if (p?.name === 'FundsWithdrawn' && Number(p.args.campaignId) === stake.campaignId) {
+                    const extraMinted = Number(ethers.formatEther(p.args.extraTokensMinted));
+                    if (extraMinted > 0 && Math.abs(amount - extraMinted) < 0.01) {
+                      isExtra = true;
+                    }
+                    break;
+                  }
+                } catch {}
+              }
+            }
+
+            entries.push({
+              type: isExtra ? 'extra_reward' : 'auto_reward',
+              amount,
+              amountDisplay: amount.toLocaleString(undefined, { maximumFractionDigits: 2 }),
+              campaignId: stake.campaignId,
+              campaignTitle: stake.campaignTitle,
+              tokenSymbol: stake.tokenSymbol,
+              txHash,
+              date,
+            });
+          }
+
+          // ── 2. Transferred OUT by user (Transfer(user → non-zero)) ──
+          const outFilter = token.filters.Transfer(address, null);
+          const outLogs = await token.queryFilter(outFilter, 0, 'latest');
+          for (const log of outLogs) {
+            const parsed = log as ethers.EventLog;
+            if (parsed.args.to === ZERO) continue;
+            const amount = Number(ethers.formatEther(parsed.args.value));
+            const block = await parsed.getBlock();
+            entries.push({
+              type: 'transferred_out',
+              amount,
+              amountDisplay: amount.toLocaleString(undefined, { maximumFractionDigits: 2 }),
+              campaignId: stake.campaignId,
+              campaignTitle: stake.campaignTitle,
+              tokenSymbol: stake.tokenSymbol,
+              txHash: parsed.transactionHash,
+              date: new Date(block!.timestamp * 1000),
+            });
+          }
+
+          // ── 3. Received FROM another address (Transfer(non-zero → user, non-mint)) ──
+          const inFilter = token.filters.Transfer(null, address);
+          const inLogs = await token.queryFilter(inFilter, 0, 'latest');
+          for (const log of inLogs) {
+            const parsed = log as ethers.EventLog;
+            if (parsed.args.from === ZERO) continue;
+            const amount = Number(ethers.formatEther(parsed.args.value));
+            const block = await parsed.getBlock();
+            entries.push({
+              type: 'transferred_in',
+              amount,
+              amountDisplay: amount.toLocaleString(undefined, { maximumFractionDigits: 2 }),
+              campaignId: stake.campaignId,
+              campaignTitle: stake.campaignTitle,
+              tokenSymbol: stake.tokenSymbol,
+              txHash: parsed.transactionHash,
+              date: new Date(block!.timestamp * 1000),
+            });
+          }
         }
 
-        // 去重（同一 campaign 同一天可能有多笔捐款）
-        const uniqueHistory = historyEntries.filter((entry, index, self) => {
-          const key = `${entry.campaignId}_${entry.amount}_${entry.date.toDateString()}`;
-          return index === self.findIndex(e => `${e.campaignId}_${e.amount}_${e.date.toDateString()}` === key);
-        });
-
-        for (const h of uniqueHistory) {
-          h.amountDisplay = h.amount.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
-        }
-
-        if (!cancelled) setHistory(uniqueHistory);
+        entries.sort((a, b) => b.date.getTime() - a.date.getTime());
+        if (!cancelled) setHistory(entries);
       } catch (err) {
-        console.error('Failed to load donation history:', err);
+        console.error('[useDonationHistory]', err);
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
 
     return () => { cancelled = true; };
-  }, [userId]);
+  }, [address, provider, stakes]);
 
   return { history, loading };
 }
@@ -207,8 +292,8 @@ function useDonationHistory(userId: string | undefined) {
 export default function Rewards() {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const { isConnected, address, ethBalance, connect, provider } = useWeb3();
-  const { history, loading: historyLoading } = useDonationHistory(user?.id);
   const { stakes, totalFdy, loading: stakesLoading } = useMyStakes(isConnected ? address : null, provider);
+  const { history, loading: historyLoading } = useDonationHistory(isConnected ? address : null, provider, stakes);
   const navigate = useNavigate();
 
   // Auth gate
@@ -255,8 +340,17 @@ export default function Rewards() {
 
   const ethNum = Number(ethBalance);
 
-  const totalEarned = history.reduce((sum, t) => sum + t.amount, 0);
-  const totalTransferred = 0; // 暂不支持转出记录
+  const totalEarned = history
+    .filter(t => t.type === 'auto_reward' || t.type === 'extra_reward' || t.type === 'transferred_in')
+    .reduce((sum, t) => sum + t.amount, 0);
+  const totalTransferred = history
+    .filter(t => t.type === 'transferred_out')
+    .reduce((sum, t) => sum + t.amount, 0);
+
+  const copyToClipboard = (text: string, label: string) => {
+    navigator.clipboard.writeText(text);
+    toast.success(`${label} copied to clipboard!`);
+  };
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-10">
@@ -307,7 +401,7 @@ export default function Rewards() {
                 +{totalEarned.toLocaleString(undefined, { maximumFractionDigits: 0 })}
               </p>
               <p className="text-xs text-muted-foreground mt-0.5 flex items-center justify-center gap-1">
-                <TrendingUp className="w-3 h-3" /> Total Tokens Earned
+                <TrendingUp className="w-3 h-3" /> Total Tokens Received
               </p>
             </CardContent>
           </Card>
@@ -324,7 +418,7 @@ export default function Rewards() {
         </div>
 
         {/* Tabs */}
-        <Tabs defaultValue="history">
+        <Tabs defaultValue="stakes">
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="history" className="gap-2">
               <TrendingUp className="w-4 h-4" /> History
@@ -336,7 +430,7 @@ export default function Rewards() {
 
           {/* History Tab */}
           <TabsContent value="history" className="mt-4">
-            {historyLoading ? (
+            {(historyLoading || stakesLoading) ? (
               <div className="flex justify-center py-16">
                 <Loader2 className="w-8 h-8 animate-spin text-primary" />
               </div>
@@ -346,8 +440,12 @@ export default function Rewards() {
                   <div className="inline-flex p-4 bg-muted rounded-full">
                     <Coins className="w-8 h-8 opacity-30" />
                   </div>
-                  <p className="font-medium">No stake token activity yet</p>
-                  <p className="text-sm">Donate to a campaign to start earning stake tokens.</p>
+                  <p className="font-medium">No token activity yet</p>
+                  <p className="text-sm">
+                    {stakes.length === 0
+                      ? 'Donate to a campaign to start earning stake tokens.'
+                      : 'Stake tokens are minted when campaign funds are withdrawn. Check back after the organizer withdraws.'}
+                  </p>
                   <Button variant="outline" onClick={() => navigate(ROUTE_PATHS.CAMPAIGNS)}>
                     Browse Campaigns
                   </Button>
@@ -393,7 +491,6 @@ export default function Rewards() {
             )}
           </TabsContent>
 
-          {/* My Stakes Tab */}
           <TabsContent value="stakes" className="mt-4">
             {stakesLoading ? (
               <div className="flex justify-center py-16">
@@ -413,7 +510,7 @@ export default function Rewards() {
                 </CardContent>
               </Card>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-4">
                 {stakes.map((s, i) => (
                   <motion.div
                     key={s.tokenAddress}
@@ -425,19 +522,34 @@ export default function Rewards() {
                       <CardContent className="p-4">
                         <div className="flex items-start justify-between gap-4">
                           <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2 mb-1">
-                              <Badge variant="outline" className="font-mono text-xs shrink-0">{s.tokenSymbol}</Badge>
+                            <div className="flex items-center gap-2 mb-1 flex-wrap">
+                              <Badge className="bg-primary/10 text-primary font-mono text-xs border-primary/20">
+                                {s.tokenSymbol}
+                              </Badge>
                               <p className="font-semibold text-sm truncate">{s.campaignTitle}</p>
                             </div>
-                            <p className="text-xs text-muted-foreground font-mono">{s.tokenAddress.slice(0, 10)}...{s.tokenAddress.slice(-8)}</p>
+                            <div className="flex items-center gap-2 mt-1">
+                              <p className="text-[10px] text-muted-foreground font-mono">
+                                {s.tokenAddress.slice(0, 10)}...{s.tokenAddress.slice(-8)}
+                              </p>
+                              <button
+                                onClick={() => copyToClipboard(s.tokenAddress, 'Contract address')}
+                                className="text-muted-foreground hover:text-primary transition-colors"
+                              >
+                                <Copy className="w-3 h-3" />
+                              </button>
+                            </div>
                           </div>
                           <div className="text-right shrink-0">
-                            <p className="font-bold text-lg text-primary">{s.balance.toLocaleString(undefined, { maximumFractionDigits: 2 })}</p>
-                            <p className="text-xs text-muted-foreground">{s.stakePct}% of supply</p>
+                            <p className="font-bold text-xl text-primary">
+                              {s.balance.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                            </p>
+                            <p className="text-[10px] text-muted-foreground">{s.stakePct}% of supply</p>
                           </div>
                         </div>
+
                         <div className="mt-3">
-                          <div className="flex justify-between text-xs text-muted-foreground mb-1">
+                          <div className="flex justify-between text-[10px] text-muted-foreground mb-0.5">
                             <span>Your stake</span>
                             <span>Total supply: {s.totalSupply.toLocaleString(undefined, { maximumFractionDigits: 2 })} {s.tokenSymbol}</span>
                           </div>
@@ -448,8 +560,27 @@ export default function Rewards() {
                             />
                           </div>
                         </div>
-                        <p className="text-[10px] text-muted-foreground mt-2">
-                          Fully transferable ERC-20 · tradeable on any platform
+
+                        <div className="flex gap-2 mt-4">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-xs h-8 flex-1 gap-1"
+                            onClick={() => copyToClipboard(s.tokenAddress, 'Contract address')}
+                          >
+                            <Copy className="w-3 h-3" /> Copy Contract
+                          </Button>
+                          <Button
+                            size="sm"
+                            className="text-xs h-8 flex-1 gap-1 bg-primary hover:bg-primary/90"
+                            onClick={() => addTokenToMetaMask(s.tokenAddress, s.tokenSymbol, 18)}
+                          >
+                            🦊 Add to MetaMask
+                          </Button>
+                        </div>
+
+                        <p className="text-[10px] text-muted-foreground text-center mt-3">
+                          💡 After adding, transfer via MetaMask using <strong>{s.tokenSymbol}</strong>
                         </p>
                       </CardContent>
                     </Card>

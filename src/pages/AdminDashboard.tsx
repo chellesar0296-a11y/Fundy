@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
   LayoutDashboard, Users, TrendingUp, ShieldAlert, CheckCircle2,
@@ -32,7 +32,6 @@ import {
   DbCancelRequest,
 } from '@/lib/supabase';
 import { useWeb3 } from '@/context/Web3Context';
-
 
 // ── Types ─────────────────────────────────────────────────────
 interface AdminCampaign {
@@ -69,26 +68,74 @@ interface AdminReward {
   token_amount: number | null;
 }
 
-// ── Supabase manual fetch helper ──────────────────────────────
-const dbFetch = async (path: string, method: string = 'GET', body?: object) => {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      'apikey': SUPABASE_ANON_KEY,
-      'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-      'Prefer': 'return=representation',
-    },
-    ...(body ? { body: JSON.stringify(body) } : {}),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.message ?? `Request failed: ${res.status}`);
+// ── Improved Supabase manual fetch helper with timeout and abort ──
+const dbFetch = async (path: string, method: string = 'GET', body?: object, signal?: AbortSignal) => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+  
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        'Prefer': 'return=representation',
+      },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+      signal: signal || controller.signal,
+    });
+    
+    clearTimeout(timeoutId);
+    
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message ?? `Request failed: ${res.status}`);
+    }
+    
+    // DELETE returns 204 no content
+    if (res.status === 204) return null;
+    return res.json();
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      throw new Error('Request timed out after 30 seconds');
+    }
+    throw err;
   }
-  // DELETE returns 204 no content
-  if (res.status === 204) return null;
-  return res.json();
 };
+
+// ── Retry utility for critical operations ──
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  maxRetries: number = 3,
+  delay: number = 1000
+): Promise<T> {
+  let lastError: any;
+  
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      lastError = err;
+      console.warn(`Attempt ${i + 1} failed:`, err.message);
+      
+      // Don't retry on user rejection or specific errors
+      if (err.code === 4001 || 
+          err.message?.includes('User rejected') ||
+          err.message?.includes('denied transaction signature')) {
+        throw err;
+      }
+      
+      if (i < maxRetries - 1) {
+        await new Promise(resolve => setTimeout(resolve, delay * Math.pow(2, i)));
+        toast.info(`Retrying... (${i + 2}/${maxRetries})`);
+      }
+    }
+  }
+  
+  throw lastError;
+}
 
 // ── Stat card ─────────────────────────────────────────────────
 function StatCard({ title, value, icon: Icon, color = 'text-primary', loading = false }: {
@@ -121,6 +168,7 @@ function CancelCampaignDialog({
   const [reason, setReason] = useState('');
   const [confirmed, setConfirmed] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
+  const isProcessingRef = useRef(false);
 
   useEffect(() => { setReason(''); setConfirmed(false); }, [campaign?.id]);
 
@@ -129,45 +177,57 @@ function CancelCampaignDialog({
   const handleCancel = async () => {
     if (!reason.trim()) { toast.error('Please provide a reason.'); return; }
     if (!confirmed) { toast.error('Please check the confirmation box.'); return; }
+    
+    if (isProcessingRef.current) {
+      toast.warning('Already processing this request');
+      return;
+    }
+    
+    isProcessingRef.current = true;
     setIsCancelling(true);
+    
     try {
       // Step 1: cancel on-chain first → auto refunds ETH to all donors
       if (campaign.on_chain_id) {
         if (!isConnected) {
           toast.error('Please connect your wallet first');
           await connect();
+          isProcessingRef.current = false;
           setIsCancelling(false);
           return;
         }
         try {
-          await cancelCampaignOnChain(Number(campaign.on_chain_id));
+          await withRetry(() => cancelCampaignOnChain(Number(campaign.on_chain_id)));
           toast.success('On-chain cancel done — ETH refunded to donors!');
         } catch (chainErr: any) {
-          // Check if it's a user rejection
           if (chainErr.code === 4001 ||
-            chainErr.message?.includes('User rejected') ||
-            chainErr.message?.includes('denied transaction signature')) {
+              chainErr.message?.includes('User rejected') ||
+              chainErr.message?.includes('denied transaction signature')) {
             toast.error('Transaction cancelled - you rejected the signature request');
           } else {
             toast.error('Transaction failed: ' + (chainErr.message?.split('\n')[0] || 'unknown error'));
           }
+          isProcessingRef.current = false;
           setIsCancelling(false);
           return;
         }
       }
+      
       // Step 2: update DB + notify organizer by email
-      await cancelCampaignWithReason(
+      await withRetry(() => cancelCampaignWithReason(
         campaign.id,
         reason.trim(),
         campaign.organizer_email,
         campaign.title,
-      );
+      ));
+      
       onCancelled(campaign.id);
       onClose();
       toast.success('Campaign cancelled. Organizer notified by email.');
     } catch (err: any) {
       toast.error(err.message ?? 'Failed to cancel campaign');
     } finally {
+      isProcessingRef.current = false;
       setIsCancelling(false);
     }
   };
@@ -240,20 +300,29 @@ function VerificationDialog({
 }) {
   const [adminNote, setAdminNote] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const isProcessingRef = useRef(false);
 
   useEffect(() => { setAdminNote(''); }, [request?.id]);
   if (!request) return null;
 
   const handle = async (action: 'approved' | 'rejected') => {
+    if (isProcessingRef.current) {
+      toast.warning('Already processing this request');
+      return;
+    }
+    
+    isProcessingRef.current = true;
     setIsProcessing(true);
+    
     try {
-      await processVerificationRequest(request.id, action, adminNote || undefined, request.user_id);
+      await withRetry(() => processVerificationRequest(request.id, action, adminNote || undefined, request.user_id));
       onProcessed(request.id, action, adminNote);
       onClose();
       toast.success(action === 'approved' ? 'User verified successfully.' : 'Request rejected.');
     } catch (err: any) {
       toast.error(err.message ?? 'Failed to process request');
     } finally {
+      isProcessingRef.current = false;
       setIsProcessing(false);
     }
   };
@@ -354,7 +423,7 @@ function VerificationDialog({
   );
 }
 
-// ── Cancel Request Review Dialog ─────────────────────────────
+// ── Cancel Request Review Dialog (FIXED VERSION) ─────────────────────────────
 function CancelRequestReviewDialog({
   request,
   onClose,
@@ -362,12 +431,13 @@ function CancelRequestReviewDialog({
 }: {
   request: DbCancelRequest | null;
   onClose: () => void;
-  onProcessed: (id: string, action: 'approved' | 'rejected') => void;
+  onProcessed: (id: string, action: 'approved' | 'rejected') => Promise<void>;
 }) {
   const { user } = useAuth();
   const { cancelCampaignOnChain } = useWeb3();
   const [adminNote, setAdminNote] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const isProcessingRef = useRef(false);
 
   useEffect(() => { setAdminNote(''); }, [request?.id]);
   if (!request) return null;
@@ -376,30 +446,37 @@ function CancelRequestReviewDialog({
   const organizer = request.profiles as any;
 
   const handle = async (action: 'approved' | 'rejected') => {
+    // Prevent concurrent executions
+    if (isProcessingRef.current) {
+      toast.warning('Already processing this request');
+      return;
+    }
+    
+    isProcessingRef.current = true;
     setIsProcessing(true);
+    
     try {
       if (action === 'approved' && campaign?.on_chain_id) {
         try {
           console.log('🔄 Cancelling on-chain campaign:', campaign.on_chain_id);
-          await cancelCampaignOnChain(Number(campaign.on_chain_id));
+          await withRetry(() => cancelCampaignOnChain(Number(campaign.on_chain_id)));
           console.log('✅ On-chain cancellation successful');
           toast.success('On-chain cancellation confirmed');
         } catch (chainErr: any) {
           console.error('❌ On-chain error:', chainErr);
           if (chainErr.code === 4001 ||
-            chainErr.message?.includes('User rejected') ||
-            chainErr.message?.includes('denied transaction signature')) {
+              chainErr.message?.includes('User rejected') ||
+              chainErr.message?.includes('denied transaction signature')) {
             toast.error('Transaction cancelled - you rejected the signature');
           } else {
             toast.error('On-chain cancel failed: ' + (chainErr.message?.split('\n')[0] || 'unknown error'));
           }
-          setIsProcessing(false);
-          return;
+          return; // Don't proceed if on-chain fails
         }
       }
 
       console.log('📝 Updating database...');
-      await processCancelRequest(
+      await withRetry(() => processCancelRequest(
         request.id,
         request.campaign_id,
         action,
@@ -407,13 +484,13 @@ function CancelRequestReviewDialog({
         adminNote || undefined,
         organizer?.email,
         campaign?.title,
-      );
+      ));
       console.log('✅ Database updated successfully');
 
-      // IMPORTANT: Call onProcessed FIRST to refresh parent data
+      // Call onProcessed to refresh parent data
       await onProcessed(request.id, action);
 
-      // THEN close the dialog
+      // Close dialog AFTER everything is done
       onClose();
 
       toast.success(action === 'approved'
@@ -422,10 +499,13 @@ function CancelRequestReviewDialog({
     } catch (err: any) {
       console.error('❌ Error in handle function:', err);
       toast.error(err.message ?? 'Failed to process request');
+      // Don't close dialog on error - let user retry
     } finally {
+      isProcessingRef.current = false;
       setIsProcessing(false);
     }
   };
+  
   return (
     <Dialog open={!!request} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-lg">
@@ -524,15 +604,20 @@ function RoleToggleConfirmDialog({
   onConfirmed: (user: AdminUser) => Promise<void>;
 }) {
   const [isProcessing, setIsProcessing] = useState(false);
+  const isProcessingRef = useRef(false);
+  
   if (!user) return null;
   const newRole = user.role === 'donor' ? 'organizer' : 'donor';
 
   const handleConfirm = async () => {
+    if (isProcessingRef.current) return;
+    isProcessingRef.current = true;
     setIsProcessing(true);
     try {
       await onConfirmed(user);
       onClose();
     } finally {
+      isProcessingRef.current = false;
       setIsProcessing(false);
     }
   };
@@ -587,7 +672,7 @@ function RoleToggleConfirmDialog({
   );
 }
 
-// ── Main ──────────────────────────────────────────────────────
+// ── Main AdminDashboard Component ─────────────────────────────────────────
 export default function AdminDashboard() {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const navigate = useNavigate();
@@ -617,6 +702,10 @@ export default function AdminDashboard() {
   const [roleToggleTarget, setRoleToggleTarget] = useState<AdminUser | null>(null);
   const [userSearch, setUserSearch] = useState('');
   const [userRoleFilter, setUserRoleFilter] = useState<'all' | 'donor' | 'organizer' | 'admin'>('all');
+  
+  // Refs to track loading states and prevent duplicate requests
+  const refreshLockRef = useRef(false);
+  const abortControllersRef = useRef<AbortController[]>([]);
 
   const stats = {
     totalCampaigns: campaigns.length,
@@ -628,12 +717,25 @@ export default function AdminDashboard() {
     pendingCancelRequests: cancelRequests.filter(r => r.status === 'pending').length,
   };
 
-  // ── Loaders ────────────────────────────────────────────────
+  // Cancel all pending requests on unmount
+  useEffect(() => {
+    return () => {
+      abortControllersRef.current.forEach(controller => controller.abort());
+    };
+  }, []);
+
+  // ── Loaders with abort support ─────────────────────────────────
   const loadCampaigns = useCallback(async () => {
+    const controller = new AbortController();
+    abortControllersRef.current.push(controller);
+    
     setLoadingCampaigns(true);
     try {
       const data = await dbFetch(
-        'campaigns?select=id,title,status,current_amount,goal_amount,donor_count,created_at,on_chain_id,profiles(name,email,is_verified)&order=created_at.desc'
+        'campaigns?select=id,title,status,current_amount,goal_amount,donor_count,created_at,on_chain_id,profiles(name,email,is_verified)&order=created_at.desc',
+        'GET',
+        undefined,
+        controller.signal
       );
       setCampaigns((data ?? []).map((c: any) => ({
         id: c.id,
@@ -649,18 +751,24 @@ export default function AdminDashboard() {
         on_chain_id: c.on_chain_id ?? null,
       })));
     } catch (err: any) {
-      toast.error('Failed to load campaigns: ' + err.message);
+      if (err.name !== 'AbortError') {
+        toast.error('Failed to load campaigns: ' + err.message);
+      }
     } finally {
       setLoadingCampaigns(false);
+      abortControllersRef.current = abortControllersRef.current.filter(c => c !== controller);
     }
   }, []);
 
   const loadUsers = useCallback(async () => {
+    const controller = new AbortController();
+    abortControllersRef.current.push(controller);
+    
     setLoadingUsers(true);
     try {
       const [profileData, donationData] = await Promise.all([
-        dbFetch('profiles?select=id,name,email,role,created_at,is_verified,verification_status&order=created_at.desc'),
-        dbFetch('donations?select=donor_id'),
+        dbFetch('profiles?select=id,name,email,role,created_at,is_verified,verification_status&order=created_at.desc', 'GET', undefined, controller.signal),
+        dbFetch('donations?select=donor_id', 'GET', undefined, controller.signal),
       ]);
 
       const counts: Record<string, number> = {};
@@ -679,17 +787,26 @@ export default function AdminDashboard() {
         verification_status: u.verification_status ?? 'none',
       })));
     } catch (err: any) {
-      toast.error('Failed to load users: ' + err.message);
+      if (err.name !== 'AbortError') {
+        toast.error('Failed to load users: ' + err.message);
+      }
     } finally {
       setLoadingUsers(false);
+      abortControllersRef.current = abortControllersRef.current.filter(c => c !== controller);
     }
   }, []);
 
   const loadRewards = useCallback(async () => {
+    const controller = new AbortController();
+    abortControllersRef.current.push(controller);
+    
     setLoadingRewards(true);
     try {
       const data = await dbFetch(
-        'rewards?select=id,status,type,token_amount,campaigns(title),profiles:donor_id(name)&order=created_at.desc'
+        'rewards?select=id,status,type,token_amount,campaigns(title),profiles:donor_id(name)&order=created_at.desc',
+        'GET',
+        undefined,
+        controller.signal
       );
       setRewards((data ?? []).map((r: any) => ({
         id: r.id,
@@ -700,58 +817,105 @@ export default function AdminDashboard() {
         token_amount: r.token_amount ?? null,
       })));
     } catch (err: any) {
-      toast.error('Failed to load rewards: ' + err.message);
+      if (err.name !== 'AbortError') {
+        toast.error('Failed to load rewards: ' + err.message);
+      }
     } finally {
       setLoadingRewards(false);
+      abortControllersRef.current = abortControllersRef.current.filter(c => c !== controller);
     }
   }, []);
 
   const loadVerifications = useCallback(async () => {
     setLoadingVerifications(true);
-    try { setVerifications(await fetchVerificationRequests()); }
-    catch { setVerifications([]); }
-    finally { setLoadingVerifications(false); }
+    try { 
+      setVerifications(await fetchVerificationRequests()); 
+    } catch (err: any) {
+      console.error('Failed to load verifications:', err);
+      setVerifications([]);
+    } finally { 
+      setLoadingVerifications(false); 
+    }
   }, []);
 
   const loadReports = useCallback(async () => {
     setLoadingReports(true);
-    try { setReports(await fetchReports()); }
-    catch { setReports([]); }
-    finally { setLoadingReports(false); }
+    try { 
+      setReports(await fetchReports()); 
+    } catch (err: any) {
+      console.error('Failed to load reports:', err);
+      setReports([]);
+    } finally { 
+      setLoadingReports(false); 
+    }
   }, []);
 
   const loadCancelRequests = useCallback(async () => {
     setLoadingCancelRequests(true);
-    try { setCancelRequests(await fetchCancelRequests()); }
-    catch { setCancelRequests([]); }
-    finally { setLoadingCancelRequests(false); }
+    try { 
+      const data = await fetchCancelRequests();
+      setCancelRequests(data); 
+    } catch (err: any) {
+      console.error('Failed to load cancel requests:', err);
+      setCancelRequests([]);
+    } finally { 
+      setLoadingCancelRequests(false); 
+    }
   }, []);
 
   useEffect(() => {
-    loadCampaigns(); loadUsers(); loadRewards(); loadVerifications(); loadReports(); loadCancelRequests();
+    loadCampaigns(); 
+    loadUsers(); 
+    loadRewards(); 
+    loadVerifications(); 
+    loadReports(); 
+    loadCancelRequests();
   }, []);
 
   const refresh = async () => {
+    if (refreshLockRef.current) {
+      toast.info('Refresh already in progress...');
+      return;
+    }
+    
+    refreshLockRef.current = true;
     setIsRefreshing(true);
-    await Promise.all([loadCampaigns(), loadUsers(), loadRewards(), loadVerifications(), loadReports(), loadCancelRequests()]);
-    setIsRefreshing(false);
-    toast.success('Data refreshed.');
+    
+    try {
+      await Promise.all([
+        loadCampaigns(), 
+        loadUsers(), 
+        loadRewards(), 
+        loadVerifications(), 
+        loadReports(), 
+        loadCancelRequests()
+      ]);
+      toast.success('Data refreshed successfully.');
+    } catch (err: any) {
+      toast.error('Refresh failed: ' + err.message);
+    } finally {
+      setIsRefreshing(false);
+      refreshLockRef.current = false;
+    }
   };
 
   // ── Actions ────────────────────────────────────────────────
   const handleCampaignAction = async (id: string, action: string) => {
-    if (action === 'view') { navigate(`/campaign/${id}`); return; }
+    if (action === 'view') { 
+      navigate(`/campaign/${id}`); 
+      return; 
+    }
     if (action === 'cancel') {
       setCancelTarget(campaigns.find(x => x.id === id) ?? null);
       return;
     }
     const newStatus = action === 'approve' ? 'active' : 'draft';
     try {
-      await dbFetch(
+      await withRetry(() => dbFetch(
         `campaigns?id=eq.${id}`,
         'PATCH',
         { status: newStatus, updated_at: new Date().toISOString() }
-      );
+      ));
       setCampaigns(prev => prev.map(c => c.id === id ? { ...c, status: newStatus } : c));
       toast.success(action === 'approve' ? 'Campaign approved.' : 'Campaign suspended.');
     } catch (err: any) {
@@ -761,11 +925,11 @@ export default function AdminDashboard() {
 
   const handleMintReward = async (id: string) => {
     try {
-      await dbFetch(
+      await withRetry(() => dbFetch(
         `rewards?id=eq.${id}`,
         'PATCH',
         { status: 'minted', minted_at: new Date().toISOString() }
-      );
+      ));
       setRewards(prev => prev.map(r => r.id === id ? { ...r, status: 'minted' } : r));
       toast.success('Reward minted.');
     } catch (err: any) {
@@ -780,7 +944,7 @@ export default function AdminDashboard() {
   const confirmToggleUserRole = async (u: AdminUser) => {
     const newRole = u.role === 'donor' ? 'organizer' : 'donor';
     try {
-      await dbFetch(`profiles?id=eq.${u.id}`, 'PATCH', { role: newRole });
+      await withRetry(() => dbFetch(`profiles?id=eq.${u.id}`, 'PATCH', { role: newRole }));
       setUsers(prev => prev.map(x => x.id === u.id ? { ...x, role: newRole } : x));
       toast.success(`${u.name} is now a${newRole === 'organizer' ? 'n' : ''} ${newRole}.`);
     } catch (err: any) {
@@ -800,7 +964,7 @@ export default function AdminDashboard() {
         setPendingReportId(reportId);
         return;
       }
-      await updateReportStatus(reportId, action);
+      await withRetry(() => updateReportStatus(reportId, action));
       setReports(prev => prev.map(r => r.id === reportId ? { ...r, status: action } : r));
       if (action === 'dismissed') toast.success('Report dismissed.');
     } catch (err: any) {
@@ -816,7 +980,7 @@ export default function AdminDashboard() {
     }
     setIsAddingAdmin(true);
     try {
-      await addAdmin(address);
+      await withRetry(() => addAdmin(address));
       setIsAdmin(true);
       toast.success(`Wallet ${address.slice(0, 6)}...${address.slice(-4)} registered as admin on-chain!`);
     } catch (err: any) {
@@ -825,6 +989,36 @@ export default function AdminDashboard() {
       setIsAddingAdmin(false);
     }
   };
+
+  // ── FIXED: Process cancel request callback with safe refresh ──
+  const handleCancelRequestProcessed = useCallback(async (id: string, action: 'approved' | 'rejected') => {
+    console.log('🔄 Processing callback for request:', id, action);
+    
+    // Update local state immediately for UI responsiveness
+    setCancelRequests(prev => prev.map(cr => 
+      cr.id === id ? { ...cr, status: action } : cr
+    ));
+    
+    if (action === 'approved') {
+      // Update the campaign status locally
+      const updatedRequest = cancelRequests.find(cr => cr.id === id);
+      if (updatedRequest) {
+        setCampaigns(prev => prev.map(c => 
+          c.id === updatedRequest.campaign_id 
+            ? { ...c, status: 'cancelled' } 
+            : c
+        ));
+      }
+    }
+    
+    // Silent background refresh (don't await to avoid blocking)
+    setTimeout(() => {
+      loadCancelRequests().catch(console.error);
+      if (action === 'approved') {
+        loadCampaigns().catch(console.error);
+      }
+    }, 1000);
+  }, [cancelRequests, loadCancelRequests, loadCampaigns]);
 
   // ── Auth guard ─────────────────────────────────────────────
   if (authLoading) return (
@@ -930,9 +1124,6 @@ export default function AdminDashboard() {
           <TabsList className="mb-6 flex-wrap h-auto gap-1">
             <TabsTrigger value="campaigns" className="gap-2">
               <LayoutDashboard className="w-4 h-4" /> Campaigns
-            </TabsTrigger>
-            <TabsTrigger value="users" className="gap-2">
-              <Users className="w-4 h-4" /> Users
             </TabsTrigger>
             <TabsTrigger value="reports" className="gap-2 relative">
               <Flag className="w-4 h-4" /> Reports
@@ -1048,140 +1239,6 @@ export default function AdminDashboard() {
             </Card>
           </TabsContent>
 
-          {/* ── Users ── */}
-          <TabsContent value="users">
-            <Card>
-              <CardHeader>
-                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-                  <div>
-                    <CardTitle>User Management</CardTitle>
-                    <CardDescription className="mt-1">
-                      Manage roles and view activity for all registered users.
-                    </CardDescription>
-                  </div>
-                  <div className="relative w-full sm:w-64 shrink-0">
-                    <input
-                      type="text"
-                      placeholder="Search name or email…"
-                      value={userSearch}
-                      onChange={(e) => setUserSearch(e.target.value)}
-                      className="w-full pl-8 pr-3 py-1.5 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 placeholder:text-muted-foreground"
-                    />
-                    <svg
-                      className="absolute left-2.5 top-2 w-3.5 h-3.5 text-muted-foreground pointer-events-none"
-                      fill="none" stroke="currentColor" viewBox="0 0 24 24"
-                    >
-                      <circle cx="11" cy="11" r="8" strokeWidth="2" />
-                      <path d="m21 21-4.35-4.35" strokeWidth="2" strokeLinecap="round" />
-                    </svg>
-                  </div>
-                </div>
-                <div className="flex flex-wrap gap-2 mt-3">
-                  {(['all', 'donor', 'organizer', 'admin'] as const).map((role) => (
-                    <button
-                      key={role}
-                      onClick={() => setUserRoleFilter(role)}
-                      className={`text-xs px-3 py-1 rounded-full border font-medium transition-colors capitalize ${userRoleFilter === role
-                        ? 'bg-primary text-primary-foreground border-primary'
-                        : 'bg-background text-muted-foreground border-border hover:bg-muted/50'
-                        }`}
-                    >
-                      {role === 'all' ? 'All' : role} <span className="opacity-60">({roleCounts[role]})</span>
-                    </button>
-                  ))}
-                </div>
-              </CardHeader>
-              <CardContent className="overflow-x-auto p-0">
-                {loadingUsers
-                  ? <div className="flex justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>
-                  : filteredUsers.length === 0
-                    ? (
-                      <div className="text-center py-16 text-muted-foreground">
-                        <Users className="w-12 h-12 mx-auto mb-4 opacity-20" />
-                        <p className="font-medium">
-                          {userSearch || userRoleFilter !== 'all' ? 'No users match your filters.' : 'No users found.'}
-                        </p>
-                        {(userSearch || userRoleFilter !== 'all') && (
-                          <button
-                            className="text-xs text-primary mt-2 hover:underline"
-                            onClick={() => { setUserSearch(''); setUserRoleFilter('all'); }}
-                          >
-                            Clear filters
-                          </button>
-                        )}
-                      </div>
-                    )
-                    : (
-                      <table className="w-full text-sm">
-                        <thead className="border-b bg-muted/30 text-muted-foreground">
-                          <tr>
-                            <th className="px-4 py-3 text-left font-medium">User</th>
-                            <th className="px-4 py-3 text-left font-medium">Role</th>
-                            <th className="px-4 py-3 text-left font-medium">Verification</th>
-                            <th className="px-4 py-3 text-center font-medium">Donations</th>
-                            <th className="px-4 py-3 text-left font-medium">Joined</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {filteredUsers.map((u) => {
-                            const initials = u.name
-                              ? u.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()
-                              : '?';
-                            return (
-                              <tr key={u.id} className="border-b hover:bg-muted/30 transition-colors">
-                                <td className="px-4 py-3">
-                                  <div className="flex items-center gap-3">
-                                    <div className="w-8 h-8 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center shrink-0 select-none">
-                                      {initials}
-                                    </div>
-                                    <div className="min-w-0">
-                                      <p className="font-medium leading-none truncate">{u.name}</p>
-                                      <p className="text-xs text-muted-foreground mt-0.5 truncate">{u.email}</p>
-                                    </div>
-                                  </div>
-                                </td>
-                                <td className="px-4 py-3">
-                                  <Badge
-                                    variant={u.role === 'admin' ? 'default' : u.role === 'organizer' ? 'secondary' : 'outline'}
-                                    className="text-xs capitalize"
-                                  >
-                                    {u.role}
-                                  </Badge>
-                                </td>
-                                <td className="px-4 py-3">
-                                  {u.is_verified ? (
-                                    <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
-                                      <CheckCircle className="w-3 h-3" /> Verified
-                                    </span>
-                                  ) : u.verification_status === 'pending' ? (
-                                    <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
-                                      <Clock className="w-3 h-3" /> Pending
-                                    </span>
-                                  ) : (
-                                    <span className="text-xs text-muted-foreground">—</span>
-                                  )}
-                                </td>
-                                <td className="px-4 py-3 text-center">
-                                  {u.donation_count > 0 ? (
-                                    <span className="inline-flex items-center justify-center text-xs font-semibold bg-primary/10 text-primary px-2 py-0.5 rounded-full min-w-[24px]">
-                                      {u.donation_count}
-                                    </span>
-                                  ) : (
-                                    <span className="text-xs text-muted-foreground">0</span>
-                                  )}
-                                </td>
-                                <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
-                                  {new Date(u.joined).toLocaleDateString()}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    )}
-              </CardContent>
-            </Card>
-          </TabsContent>
 
           {/* ── Rewards ── */}
           <TabsContent value="rewards">
@@ -1513,44 +1570,7 @@ export default function AdminDashboard() {
       <CancelRequestReviewDialog
         request={selectedCancelRequest}
         onClose={() => setSelectedCancelRequest(null)}
-        onProcessed={async (id, action) => {
-          console.log('🔄 Refreshing data after processing request:', id, action);
-
-          try {
-            // Force refresh cancel requests from database
-            const freshCancelRequests = await fetchCancelRequests();
-            console.log('Fresh cancel requests:', freshCancelRequests);
-            setCancelRequests(freshCancelRequests);
-
-            // Force refresh campaigns
-            const freshCampaigns = await dbFetch(
-              'campaigns?select=id,title,status,current_amount,goal_amount,donor_count,created_at,on_chain_id,profiles(name,email,is_verified)&order=created_at.desc'
-            );
-            setCampaigns(freshCampaigns.map((c: any) => ({
-              id: c.id,
-              title: c.title,
-              status: c.status,
-              current_amount: Number(c.current_amount),
-              goal_amount: Number(c.goal_amount),
-              donor_count: c.donor_count,
-              organizer_name: c.profiles?.name ?? '—',
-              organizer_email: c.profiles?.email ?? '',
-              organizer_verified: c.profiles?.is_verified ?? false,
-              created_at: c.created_at,
-              on_chain_id: c.on_chain_id ?? null,
-            })));
-
-            // Update pending counts in stats
-            // The stats will automatically update because they depend on the state
-
-            toast.success(action === 'approved'
-              ? 'Cancel request approved - campaign cancelled'
-              : 'Cancel request rejected');
-          } catch (err) {
-            console.error('Failed to refresh data:', err);
-            toast.error('Failed to refresh data, please refresh manually');
-          }
-        }}
+        onProcessed={handleCancelRequestProcessed}
       />
       <RoleToggleConfirmDialog
         user={roleToggleTarget}

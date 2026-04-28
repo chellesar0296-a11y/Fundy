@@ -3,8 +3,9 @@ import { ethers } from 'ethers';
 import { supabase } from '@/lib/supabase';
 
 export const CONTRACT_ADDRESSES = {
-  crowdfunding: '0xC106822E2dCb3C8a2Eb6e50B1b0cBE64EC0f73Ef',
-  token:        '0x66b5A93f977168c0DC7f0961653E534450785c94', 
+  crowdfunding: '0x10306e1F06F6eD9272e72A6dBdc1b91783101FDa',
+  token:        '0xA3e13959c7f3327F2c06E3155A8343Cfef705147',
+  batchTransfer: '0x8BD1aA336BaC450C7b15dfa63D2cfAe65978e22B',
 };
 
 export const CROWDFUNDING_ABI = [
@@ -125,12 +126,12 @@ interface Web3ContextType {
   // Campaign
   createCampaignOnChain: (
     supabaseId:     string,
-    goalEth:        string,   // e.g. "10.5" — will be converted to wei internally
-    deadlineTs:     number,   // unix timestamp
+    goalEth:        string,   
+    deadlineTs:     number,   
     campaignTitle:  string,
-    extraQuantity:  string,   // "0" if none
-    extraFdyAmount: string,   // tokens (whole number), e.g. "200" — converted to 18-decimal internally
-    extraMinDonate: string,   // ETH, e.g. "1" — converted to wei internally
+    extraQuantity:  string,   
+    extraFdyAmount: string, 
+    extraMinDonate: string,  
   ) => Promise<number>;
 
   donateEth:             (onChainId: number, amountEth: string) => Promise<any>;
@@ -424,5 +425,10 @@ export function useWeb3() {
   if (!ctx) throw new Error('useWeb3 must be used inside <Web3Provider>');
   return ctx;
 }
+
+export const BATCH_TRANSFER_ABI = [
+  'function disperseEther(address[] recipients, uint256[] values) external payable',
+];
+
 
 declare global { interface Window { ethereum?: any; } }

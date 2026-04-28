@@ -19,7 +19,7 @@ import {
   Send, ImagePlus, Trash2, Edit, Save, Info, Clock, XCircle, CheckCircle2,
   Wallet, AlertTriangle,
 } from 'lucide-react';
-import { useWeb3, CROWDFUNDING_ABI, CONTRACT_ADDRESSES } from '@/context/Web3Context';
+import { useWeb3, CROWDFUNDING_ABI, CONTRACT_ADDRESSES, BATCH_TRANSFER_ABI } from '@/context/Web3Context';
 import { ethers } from 'ethers';
 import {
   createCampaignUpdate,
@@ -32,8 +32,6 @@ import {
 } from '@/lib/supabase';
 
 // ── Extra Stake Token Reward Card ─────────────────────────────
-// ── Extra Stake Token Reward Card — reads live from chain, calculates remaining slots correctly ──
-
 function ExtraFdyRewardCard({ onChainId }: { onChainId: number }) {
   const { provider } = useWeb3();
   const [info, setInfo] = React.useState<{
@@ -41,8 +39,8 @@ function ExtraFdyRewardCard({ onChainId }: { onChainId: number }) {
     quantity: number;
     fdyAmount: string;
     minDonate: string;
-    slotsTaken: number;      // ✅ 实际已领奖人数
-    slotsRemaining: number;   // ✅ 动态计算
+    slotsTaken: number;
+    slotsRemaining: number;
     tokenSymbol: string;
   } | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -81,18 +79,15 @@ function ExtraFdyRewardCard({ onChainId }: { onChainId: number }) {
         }
         
         const donorsList = await contract.getDonors(onChainId);
-        
         const minDonateWei = extra.minDonate;
         
         const qualifiedDonors = await Promise.all(
           donorsList.map(async (donor: string) => {
-
             const donationWei = await contract.getEthDonation(onChainId, donor);
-
             const alreadyAwarded = await contract.extraAwarded(onChainId, donor);
-            
-
-            return donationWei >= minDonateWei && !alreadyAwarded;
+            // Count as taken if donor met the minimum OR reward was already minted.
+            // Without this, slotsTaken resets to 0 after withdrawal (when all extraAwarded = true).
+            return donationWei >= minDonateWei || alreadyAwarded;
           })
         );
         
@@ -167,18 +162,211 @@ function ExtraFdyRewardCard({ onChainId }: { onChainId: number }) {
     </div>
   );
 }
+
+// ── Distribute Dividend Dialog (使用 BatchTransfer 合约，一笔交易完成) ──
+function DistributeDividendDialog({
+  open, onClose, holders, tokenSymbol, signer,
+}: {
+  open: boolean;
+  onClose: () => void;
+  holders: { address: string; stakeBalance: string; stakePct: string }[];
+  tokenSymbol: string;
+  signer: any;
+}) {
+  const [amount, setAmount] = useState('');
+  const [isDistributing, setIsDistributing] = useState(false);
+  const [txHash, setTxHash] = useState('');
+
+  const amountNum = parseFloat(amount) || 0;
+
+  const preview = holders.map(h => ({
+    address: h.address,
+    stakePct: parseFloat(h.stakePct),
+    receives: amountNum * (parseFloat(h.stakePct) / 100),
+  })).filter(p => p.receives >= 0.000001);
+
+  const totalPreview = preview.reduce((s, p) => s + p.receives, 0);
+  const isValid = Math.abs(totalPreview - amountNum) < 0.000001;
+
+  const handleDistribute = async () => {
+    if (!signer || amountNum <= 0 || preview.length === 0) return;
+    if (!isValid) {
+      toast.error(`Total mismatch: ${totalPreview.toFixed(6)} ≠ ${amountNum.toFixed(6)}`);
+      return;
+    }
+
+    setIsDistributing(true);
+    setTxHash('');
+
+    try {
+      const batchTransfer = new ethers.Contract(
+        CONTRACT_ADDRESSES.batchTransfer,
+        BATCH_TRANSFER_ABI,
+        signer
+      );
+
+      const recipients = preview.map(p => p.address);
+      const values = preview.map(p => ethers.parseEther(p.receives.toFixed(18)));
+      const totalWei = values.reduce((a, b) => a + b, 0n);
+
+      const tx = await batchTransfer.disperseEther(recipients, values, { value: totalWei });
+      setTxHash(tx.hash);
+      await tx.wait();
+
+      toast.success(`Successfully sent ${amountNum} ETH to ${preview.length} stakeholders in one transaction!`);
+      onClose();
+      setAmount('');
+      setTxHash('');
+    } catch (err: any) {
+      console.error('Distribution error:', err);
+      toast.error(err?.message || 'Distribution failed. Make sure BatchTransfer contract is deployed.');
+    } finally {
+      setIsDistributing(false);
+    }
+  };
+
+  const handleClose = () => {
+    if (isDistributing) return;
+    setAmount('');
+    setTxHash('');
+    onClose();
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={handleClose}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            💸 Distribute ETH Dividend
+          </DialogTitle>
+          <DialogDescription>
+            Send ETH proportionally to all {tokenSymbol} stakeholders.
+            <span className="text-xs text-emerald-600 mt-1 block">
+              ✅ One transaction — all recipients receive ETH at once via BatchTransfer contract!
+            </span>
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-5 pt-2">
+          {/* Amount input */}
+          <div className="space-y-2">
+            <Label className="font-semibold">Total ETH to Distribute</Label>
+            <div className="relative">
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground font-bold">⟠</span>
+              <Input
+                type="number"
+                min="0.0001"
+                step="0.001"
+                placeholder="0.00"
+                className="pl-10 h-12 text-lg font-bold"
+                value={amount}
+                onChange={e => setAmount(e.target.value)}
+                disabled={isDistributing}
+              />
+            </div>
+          </div>
+
+          {/* Info box */}
+          <div className="flex items-start gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800">
+            <Info className="w-4 h-4 shrink-0 mt-0.5 text-blue-600" />
+            <div>
+              <p className="font-semibold">One transaction, all recipients</p>
+              <p className="mt-0.5">{preview.length} stakeholders will receive ETH in a single MetaMask confirmation.</p>
+            </div>
+          </div>
+
+          {/* Preview table */}
+          {amountNum > 0 && preview.length > 0 && (
+            <div className="rounded-xl border overflow-hidden">
+              <div className="bg-muted/50 px-4 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Distribution Preview ({preview.length} recipients)
+              </div>
+              <div className="divide-y max-h-52 overflow-y-auto">
+                {preview.slice(0, 10).map((p, i) => (
+                  <div key={p.address} className="flex items-center justify-between px-4 py-2.5 text-sm">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-muted-foreground text-xs w-5">{i + 1}</span>
+                      <span className="font-mono text-xs truncate">{p.address.slice(0, 10)}...{p.address.slice(-6)}</span>
+                      <span className="text-xs text-muted-foreground shrink-0">({p.stakePct.toFixed(2)}%)</span>
+                    </div>
+                    <span className="font-semibold text-emerald-600 shrink-0">⟠ {p.receives.toFixed(6)}</span>
+                  </div>
+                ))}
+                {preview.length > 10 && (
+                  <div className="px-4 py-2 text-center text-xs text-muted-foreground">
+                    ... and {preview.length - 10} more
+                  </div>
+                )}
+              </div>
+              <div className="px-4 py-2.5 bg-muted/30 flex justify-between text-xs font-semibold border-t">
+                <span>Total to send</span>
+                <span className={!isValid ? 'text-red-500' : 'text-emerald-600'}>
+                  ⟠ {totalPreview.toFixed(6)} ETH
+                  {!isValid && ` (should be ${amountNum})`}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Transaction hash */}
+          {txHash && (
+            <div className="p-2 bg-muted/40 rounded-lg text-[10px] break-all">
+              <span className="text-muted-foreground">Tx: </span>
+              <a
+                href={`https://sepolia.etherscan.io/tx/${txHash}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary hover:underline"
+              >
+                {txHash.slice(0, 16)}...
+              </a>
+            </div>
+          )}
+
+          <div className="flex gap-3">
+            <Button variant="outline" className="flex-1" onClick={handleClose} disabled={isDistributing}>
+              Cancel
+            </Button>
+            <Button
+              className="flex-1"
+              disabled={isDistributing || amountNum <= 0 || preview.length === 0 || !isValid}
+              onClick={handleDistribute}
+            >
+              {isDistributing ? (
+                <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Sending...</>
+              ) : (
+                <>💸 Send to {preview.length} holders (1 tx)</>
+              )}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ── Stakeholders Panel ────────────────────────────────────────
 function StakeholdersPanel({ onChainId }: { onChainId: number }) {
-  const { provider } = useWeb3();
+  const { provider, signer } = useWeb3();
   const [holders, setHolders] = React.useState<{
     address: string;
     ethDonated: string;
     stakeBalance: string;
     stakePct: string;
+    isDonor: boolean;
   }[]>([]);
   const [tokenSymbol, setTokenSymbol] = React.useState('FDY');
   const [totalStake, setTotalStake] = React.useState('0');
   const [loading, setLoading] = React.useState(true);
+  const [copiedAddr, setCopiedAddr] = React.useState<string | null>(null);
+  const [showDividend, setShowDividend] = React.useState(false);
+
+  const copyAddress = (addr: string) => {
+    navigator.clipboard.writeText(addr).then(() => {
+      setCopiedAddr(addr);
+      setTimeout(() => setCopiedAddr(null), 2000);
+    });
+  };
 
   React.useEffect(() => {
     if (!provider || !onChainId) return;
@@ -191,8 +379,7 @@ function StakeholdersPanel({ onChainId }: { onChainId: number }) {
         const sym = campaign.tokenSymbol || 'FDY';
         if (!cancelled) setTokenSymbol(sym);
 
-        const donorList: string[] = await contract.getDonors(onChainId);
-        if (donorList.length === 0) {
+        if (!campaign.stakeToken || campaign.stakeToken === ethers.ZeroAddress) {
           if (!cancelled) { setHolders([]); setLoading(false); }
           return;
         }
@@ -202,29 +389,61 @@ function StakeholdersPanel({ onChainId }: { onChainId: number }) {
           [
             'function balanceOf(address) view returns (uint256)',
             'function totalSupply() view returns (uint256)',
+            'event Transfer(address indexed from, address indexed to, uint256 value)',
           ],
           provider,
         );
 
-        const [totalSupply, ...balances] = await Promise.all([
-          tokenContract.totalSupply(),
-          ...donorList.map((d: string) => tokenContract.balanceOf(d)),
-        ]);
+        const transferFilter = tokenContract.filters.Transfer();
+        const transferEvents = await tokenContract.queryFilter(transferFilter);
 
+        const holderSet = new Set<string>();
+        const ZERO = ethers.ZeroAddress;
+        for (const e of transferEvents) {
+          const [from, to] = (e as any).args;
+          if (to && to !== ZERO) holderSet.add(to.toLowerCase());
+          if (from && from !== ZERO) holderSet.add(from.toLowerCase());
+        }
+
+        if (holderSet.size === 0) {
+          if (!cancelled) { setHolders([]); setLoading(false); }
+          return;
+        }
+
+        const donorList: string[] = await contract.getDonors(onChainId);
+        const donorSet = new Set(donorList.map(d => d.toLowerCase()));
+
+        const totalSupply = await tokenContract.totalSupply();
         const totalNum = Number(ethers.formatEther(totalSupply));
         if (!cancelled) setTotalStake(totalNum.toLocaleString(undefined, { maximumFractionDigits: 2 }));
 
-        const rows = await Promise.all(donorList.map(async (d: string, i: number) => {
-          const bal = Number(ethers.formatEther(balances[i]));
-          const ethAmt = Number(ethers.formatEther(await contract.getEthDonation(onChainId, d)));
-          const pct = totalNum > 0 ? ((bal / totalNum) * 100).toFixed(2) : '0.00';
-          return {
-            address:      d,
-            ethDonated:   ethAmt.toFixed(4),
-            stakeBalance: bal.toLocaleString(undefined, { maximumFractionDigits: 2 }),
-            stakePct:     pct,
-          };
-        }));
+        const allAddresses = Array.from(holderSet);
+        const balances = await Promise.all(allAddresses.map(addr => tokenContract.balanceOf(addr)));
+
+        const rows = await Promise.all(
+          allAddresses
+            .map((addr, i) => ({ addr, bal: balances[i] }))
+            .filter(({ bal }) => bal > 0n)
+            .map(async ({ addr, bal }) => {
+              const balNum = Number(ethers.formatEther(bal));
+              const pct = totalNum > 0 ? ((balNum / totalNum) * 100).toFixed(2) : '0.00';
+              const isDonor = donorSet.has(addr);
+              let ethAmt = '0.0000';
+              if (isDonor) {
+                try {
+                  const donated = await contract.getEthDonation(onChainId, addr);
+                  ethAmt = Number(ethers.formatEther(donated)).toFixed(4);
+                } catch {}
+              }
+              return {
+                address: addr,
+                ethDonated: ethAmt,
+                stakeBalance: balNum.toLocaleString(undefined, { maximumFractionDigits: 2 }),
+                stakePct: pct,
+                isDonor,
+              };
+            })
+        );
 
         rows.sort((a, b) => parseFloat(b.stakeBalance.replace(/,/g, '')) - parseFloat(a.stakeBalance.replace(/,/g, '')));
         if (!cancelled) setHolders(rows);
@@ -252,15 +471,25 @@ function StakeholdersPanel({ onChainId }: { onChainId: number }) {
 
   return (
     <div className="space-y-3">
-      <p className="text-xs text-muted-foreground">
-        Total supply: <span className="font-semibold text-foreground">{totalStake} {tokenSymbol}</span> · Showing all {holders.length} stakeholders
-      </p>
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <p className="text-xs text-muted-foreground">
+          Total supply: <span className="font-semibold text-foreground">{totalStake} {tokenSymbol}</span> · {holders.length} stakeholders
+        </p>
+        <Button
+          size="sm"
+          variant="outline"
+          className="gap-2 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+          onClick={() => setShowDividend(true)}
+        >
+          💸 Distribute ETH Dividend
+        </Button>
+      </div>
       <div className="overflow-x-auto rounded-xl border">
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-muted/50 text-xs text-muted-foreground">
               <th className="text-left px-4 py-2.5 font-semibold">#</th>
-              <th className="text-left px-4 py-2.5 font-semibold">Wallet</th>
+              <th className="text-left px-4 py-2.5 font-semibold">Wallet Address</th>
               <th className="text-right px-4 py-2.5 font-semibold">ETH Donated</th>
               <th className="text-right px-4 py-2.5 font-semibold">{tokenSymbol} Balance</th>
               <th className="text-right px-4 py-2.5 font-semibold">Stake %</th>
@@ -271,9 +500,30 @@ function StakeholdersPanel({ onChainId }: { onChainId: number }) {
               <tr key={h.address} className="hover:bg-muted/20 transition-colors">
                 <td className="px-4 py-3 text-muted-foreground text-xs">{i + 1}</td>
                 <td className="px-4 py-3">
-                  <span className="font-mono text-xs">{h.address.slice(0, 8)}...{h.address.slice(-6)}</span>
+                  <div className="flex items-center gap-2 group flex-wrap">
+                    <span className="font-mono text-xs break-all">{h.address}</span>
+                    {!h.isDonor && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-200 shrink-0">transferred in</span>
+                    )}
+                    <button
+                      onClick={() => copyAddress(h.address)}
+                      className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-muted"
+                      title="Copy address"
+                    >
+                      {copiedAddr === h.address ? (
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                      ) : (
+                        <svg className="w-3.5 h-3.5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <rect x="9" y="9" width="13" height="13" rx="2" />
+                          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                        </svg>
+                      )}
+                    </button>
+                  </div>
                 </td>
-                <td className="px-4 py-3 text-right font-mono text-xs">⟠ {h.ethDonated}</td>
+                <td className="px-4 py-3 text-right font-mono text-xs">
+                  {h.isDonor ? `⟠ ${h.ethDonated}` : <span className="text-muted-foreground">—</span>}
+                </td>
                 <td className="px-4 py-3 text-right font-semibold text-xs">{h.stakeBalance}</td>
                 <td className="px-4 py-3 text-right">
                   <div className="flex items-center justify-end gap-2">
@@ -288,6 +538,14 @@ function StakeholdersPanel({ onChainId }: { onChainId: number }) {
           </tbody>
         </table>
       </div>
+
+      <DistributeDividendDialog
+        open={showDividend}
+        onClose={() => setShowDividend(false)}
+        holders={holders}
+        tokenSymbol={tokenSymbol}
+        signer={signer}
+      />
     </div>
   );
 }
@@ -569,7 +827,6 @@ export default function CampaignManage() {
     rejected: <Badge className="bg-slate-100 text-slate-600 border-0 text-xs">Cancel Rejected</Badge>,
   }[cancelRequest.status] : null;
 
-  // ✅ 正确的 goal reached 判断 — 只用 totalRaisedEth，没有 totalRaisedFdy
   const totalRaisedEth  = onChainData ? Number(ethers.formatEther(onChainData.totalRaisedEth)) : 0;
   const goalEth         = onChainData ? Number(ethers.formatEther(onChainData.goalAmount))     : 0;
   const goalReached     = onChainData ? onChainData.totalRaisedEth >= onChainData.goalAmount   : false;
@@ -731,144 +988,93 @@ export default function CampaignManage() {
               </Card>
 
               <Card>
-                <CardHeader className="flex flex-row items-center justify-between">
-                  <div>
-                    <CardTitle>Campaign Details</CardTitle>
-                    <CardDescription>Edit your campaign's information</CardDescription>
-                  </div>
-                  {!isEditMode ? (
-                    <Button variant="outline" size="sm" onClick={() => setIsEditMode(true)}>
-                      <Edit className="w-3 h-3 mr-2" /> Edit
-                    </Button>
-                  ) : (
-                    <div className="flex gap-2">
-                      <Button variant="ghost" size="sm" onClick={() => setIsEditMode(false)}>Cancel</Button>
-                      <Button size="sm" onClick={handleSaveCampaign} disabled={isSaving}>
-                        {isSaving ? <Loader2 className="w-3 h-3 animate-spin mr-2" /> : <Save className="w-3 h-3 mr-2" />}
-                        Save
-                      </Button>
-                    </div>
-                  )}
+                <CardHeader>
+                  <CardTitle>Campaign Details</CardTitle>
+                  <CardDescription>Your campaign's information</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {!isEditMode ? (
-                    <>
-                      <div>
-                        <p className="text-xs text-muted-foreground mb-1">Title</p>
-                        <p className="font-medium">{campaign.title}</p>
-                      </div>
-                      <Separator />
-                      <div>
-                        <p className="text-xs text-muted-foreground mb-1">Short Description</p>
-                        <p className="text-sm">{campaign.shortDescription}</p>
-                      </div>
-                      <Separator />
-                      <div>
-                        <p className="text-xs text-muted-foreground mb-1">End Date</p>
-                        <p className="text-sm">{new Date(campaign.endDate).toLocaleDateString()}</p>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="space-y-2">
-                        <Label>Campaign Title</Label>
-                        <Input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Short Description</Label>
-                        <Input value={editShortDesc} onChange={(e) => setEditShortDesc(e.target.value)} />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Full Description</Label>
-                        <Textarea value={editDesc} onChange={(e) => setEditDesc(e.target.value)} rows={6} />
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label>End Date</Label>
-                          <Input type="date" value={editEndDate} onChange={(e) => setEditEndDate(e.target.value)} />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Campaign Image URL</Label>
-                          <Input value={editImageUrl} onChange={(e) => setEditImageUrl(e.target.value)} placeholder="https://..." />
-                        </div>
-                      </div>
-                      <div className="flex items-start gap-2 p-3 bg-muted/40 rounded-lg text-xs text-muted-foreground">
-                        <Info className="w-4 h-4 shrink-0 mt-0.5" />
-                        The goal amount cannot be modified after creation to protect your backers.
-                      </div>
-                    </>
-                  )}
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader><CardTitle>Recent Updates</CardTitle></CardHeader>
-                <CardContent>
-                  {updates.length === 0 ? (
-                    <p className="text-center text-muted-foreground py-8">No updates yet. Post your first update!</p>
-                  ) : (
-                    <div className="space-y-4">
-                      {updates.slice(0, 3).map((update: any) => (
-                        <div key={update.id} className="border-b last:border-0 pb-3 last:pb-0">
-                          <p className="font-semibold text-sm">{update.title}</p>
-                          <p className="text-xs text-muted-foreground">{new Date(update.created_at).toLocaleDateString()}</p>
-                          <p className="text-sm mt-1 line-clamp-2">{update.content}</p>
-                        </div>
-                      ))}
+                  <>
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Title</p>
+                      <p className="font-medium">{campaign.title}</p>
                     </div>
-                  )}
+                    <Separator />
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Short Description</p>
+                      <p className="text-sm">{campaign.shortDescription}</p>
+                    </div>
+                    <Separator />
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">End Date</p>
+                      <p className="text-sm">{new Date(campaign.endDate).toLocaleDateString()}</p>
+                    </div>
+                  </>
                 </CardContent>
               </Card>
             </TabsContent>
 
             {/* Post Update Tab */}
             <TabsContent value="updates" className="space-y-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Share an Update</CardTitle>
-                  <CardDescription>Keep your supporters informed about campaign progress.</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    <Label>Update Title</Label>
-                    <Input placeholder="e.g., We've reached 50% of our goal!" value={updateTitle} onChange={(e) => setUpdateTitle(e.target.value)} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Update Content</Label>
-                    <Textarea placeholder="Share the latest news..." rows={6} value={updateContent} onChange={(e) => setUpdateContent(e.target.value)} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Add Image (Optional)</Label>
-                    {mediaPreview ? (
-                      <div className="relative">
-                        <img src={mediaPreview} alt="Preview" className="w-full h-48 object-contain rounded-lg border bg-muted/30" />
-                        <button type="button" onClick={() => { setMediaFile(null); setMediaPreview(null); }}
-                          className="absolute top-2 right-2 bg-destructive text-white rounded-full w-6 h-6 flex items-center justify-center text-xs hover:bg-destructive/80">
-                          ✕
-                        </button>
-                      </div>
-                    ) : (
-                      <label className="flex flex-col items-center justify-center border-2 border-dashed rounded-lg p-6 text-center text-muted-foreground cursor-pointer hover:border-primary/50 hover:bg-muted/30 transition-colors">
-                        <ImagePlus className="w-8 h-8 mx-auto mb-2" />
-                        <p className="text-sm font-medium">Click to upload an image</p>
-                        <p className="text-xs mt-1">JPG, PNG, GIF up to 5MB</p>
-                        <input type="file" accept="image/*" className="hidden" onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (!file) return;
-                          if (file.size > 5 * 1024 * 1024) { toast.error('File size must be under 5MB'); return; }
-                          setMediaFile(file);
-                          setMediaPreview(URL.createObjectURL(file));
-                        }} />
-                      </label>
-                    )}
-                  </div>
-                  <Button onClick={handlePostUpdate} disabled={isPostingUpdate || isUploadingMedia} className="w-full">
-                    {isUploadingMedia ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Uploading image...</>
-                      : isPostingUpdate ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Publishing...</>
-                        : <><Send className="w-4 h-4 mr-2" /> Publish Update</>}
-                  </Button>
-                </CardContent>
-              </Card>
+              {campaign.status === 'active' ? (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Share an Update</CardTitle>
+                    <CardDescription>Keep your supporters informed about campaign progress.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="space-y-2">
+                      <Label>Update Title</Label>
+                      <Input placeholder="e.g., We've reached 50% of our goal!" value={updateTitle} onChange={(e) => setUpdateTitle(e.target.value)} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Update Content</Label>
+                      <Textarea placeholder="Share the latest news..." rows={6} value={updateContent} onChange={(e) => setUpdateContent(e.target.value)} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Add Image (Optional)</Label>
+                      {mediaPreview ? (
+                        <div className="relative">
+                          <img src={mediaPreview} alt="Preview" className="w-full h-48 object-contain rounded-lg border bg-muted/30" />
+                          <button type="button" onClick={() => { setMediaFile(null); setMediaPreview(null); }}
+                            className="absolute top-2 right-2 bg-destructive text-white rounded-full w-6 h-6 flex items-center justify-center text-xs hover:bg-destructive/80">
+                            ✕
+                          </button>
+                        </div>
+                      ) : (
+                        <label className="flex flex-col items-center justify-center border-2 border-dashed rounded-lg p-6 text-center text-muted-foreground cursor-pointer hover:border-primary/50 hover:bg-muted/30 transition-colors">
+                          <ImagePlus className="w-8 h-8 mx-auto mb-2" />
+                          <p className="text-sm font-medium">Click to upload an image</p>
+                          <p className="text-xs mt-1">JPG, PNG, GIF up to 5MB</p>
+                          <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            if (file.size > 5 * 1024 * 1024) { toast.error('File size must be under 5MB'); return; }
+                            setMediaFile(file);
+                            setMediaPreview(URL.createObjectURL(file));
+                          }} />
+                        </label>
+                      )}
+                    </div>
+                    <Button onClick={handlePostUpdate} disabled={isPostingUpdate || isUploadingMedia} className="w-full">
+                      {isUploadingMedia ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Uploading image...</>
+                        : isPostingUpdate ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Publishing...</>
+                          : <><Send className="w-4 h-4 mr-2" /> Publish Update</>}
+                    </Button>
+                  </CardContent>
+                </Card>
+              ) : (
+                <Card className="bg-muted/30 border-dashed">
+                  <CardContent className="py-12 text-center space-y-3">
+                    <MessageCircle className="w-12 h-12 text-muted-foreground mx-auto opacity-30" />
+                    <p className="font-semibold text-muted-foreground">Updates are only available for active campaigns</p>
+                    <p className="text-sm text-muted-foreground">
+                      This campaign has been <span className="font-medium">{campaign.status === 'completed' ? 'completed' : 'cancelled'}</span>.
+                      No new updates can be posted.
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
+
               {updates.length > 0 && (
                 <Card>
                   <CardHeader><CardTitle>Previous Updates</CardTitle></CardHeader>
@@ -884,7 +1090,6 @@ export default function CampaignManage() {
                 </Card>
               )}
             </TabsContent>
-
             {/* Rewards Tab */}
             <TabsContent value="rewards" className="space-y-6">
               <Card>

@@ -638,8 +638,6 @@ export default function CampaignDetail() {
   );
 }
 
-// ── Extra Stake Token Reward Card — reads live from chain ─────────────
-
 // ── Extra Stake Token Reward Card — reads live from chain, calculates remaining slots correctly ──
 
 function ExtraFdyRewardCard({ onChainId }: { onChainId: number }) {
@@ -698,8 +696,9 @@ function ExtraFdyRewardCard({ onChainId }: { onChainId: number }) {
           donorsList.map(async (donor: string) => {
             const donationWei = await contract.getEthDonation(onChainId, donor);
             const alreadyAwarded = await contract.extraAwarded(onChainId, donor);
-
-            return donationWei >= minDonateWei && !alreadyAwarded;
+            // Count as taken if donor met the minimum OR reward was already minted to them.
+            // Without this, slotsTaken resets to 0 after withdrawal (when all extraAwarded = true).
+            return donationWei >= minDonateWei || alreadyAwarded;
           })
         );
 
