@@ -73,6 +73,11 @@ export function useRefundNotifications({ userId, address, provider }: UseRefundN
         let cancelled = false;
 
         async function checkRefunds() {
+            const contract = new ethers.Contract(
+                CONTRACT_ADDRESSES.crowdfunding,
+                CROWDFUNDING_ABI,
+                providerRef.current,
+            );
             const { data: activeCampaigns } = await supabase
                 .from('campaigns')
                 .select('id, title, slug, on_chain_id, image_url, organizer_id')
@@ -103,7 +108,7 @@ export function useRefundNotifications({ userId, address, provider }: UseRefundN
                             user_id: userId,
                             type: 'campaign_goal_reached',
                             title: '🎉 Goal Reached!',
-                            message: `Your campaign "${campaign.title}" has reached its funding goal! Funds will be available to withdraw once the campaign ends.`,
+                            message: `Your campaign "${campaign.title}" has reached its funding goal! Funds will be available to withdraw.`,
                             campaign_id: campaign.id,
                             is_read: false,
                             email_sent: false,
@@ -132,13 +137,6 @@ export function useRefundNotifications({ userId, address, provider }: UseRefundN
 
                 const { data: { user } } = await supabase.auth.getUser();
                 const userEmail = user?.email ?? null;
-
-                const contract = new ethers.Contract(
-                    CONTRACT_ADDRESSES.crowdfunding,
-                    CROWDFUNDING_ABI,
-                    providerRef.current,
-                );
-
                 for (const campaign of expiredCampaigns) {
                     if (cancelled) return;
                     if (campaign.on_chain_id === null) continue;

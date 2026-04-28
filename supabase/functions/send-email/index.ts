@@ -1,10 +1,15 @@
 // supabase/functions/send-email/index.ts
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
+import { SmtpClient } from 'https://deno.land/x/denomailer@1.6.0/mod.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+
+const GMAIL_USER = 'no.reply.application1234@gmail.com';
+const GMAIL_PASS = 'hykispjnytqijaei'; // regenerate this — old one is exposed
+const FROM_NAME  = 'Fundy';
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -21,44 +26,28 @@ serve(async (req) => {
       );
     }
 
-    const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY') ?? '';
-    const FROM_NAME      = Deno.env.get('FROM_NAME') ?? 'Fundy';
+    const client = new SmtpClient();
 
-    if (!RESEND_API_KEY) {
-      console.error('[send-email] RESEND_API_KEY not configured');
-      return new Response(
-        JSON.stringify({ error: 'Email service not configured' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
-      );
-    }
-
-    const res = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${RESEND_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        from: `${FROM_NAME} <onboarding@resend.dev>`,
-        to: [to],
-        subject,
-        html,
-      }),
+    await client.connectTLS({
+      hostname: 'smtp.gmail.com',
+      port: 465,
+      username: GMAIL_USER,
+      password: GMAIL_PASS,
     });
 
-    const data = await res.json();
+    await client.send({
+      from: `${FROM_NAME} <${GMAIL_USER}>`,
+      to,
+      subject,
+      html,
+      content: 'auto',
+    });
 
-    if (!res.ok) {
-      console.error('[send-email] Resend error:', JSON.stringify(data));
-      return new Response(
-        JSON.stringify({ error: data }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
-      );
-    }
+    await client.close();
 
-    console.log(`[send-email] Sent to ${to}: ${subject}`, data);
+    console.log(`[send-email] Sent to ${to}: ${subject}`);
     return new Response(
-      JSON.stringify({ success: true, id: data.id }),
+      JSON.stringify({ success: true }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
     );
 

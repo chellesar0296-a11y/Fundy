@@ -3,106 +3,158 @@ import { ethers } from 'ethers';
 import { supabase } from '@/lib/supabase';
 
 export const CONTRACT_ADDRESSES = {
-  crowdfunding: '0x91cD53E8De0B3B0465042cAFf604c273f89307d4',
-  token:        '0xEdf8B0102fB81159C3d03D0e61Bd3A8196f0d1d2',
+  crowdfunding: '0xC106822E2dCb3C8a2Eb6e50B1b0cBE64EC0f73Ef',
+  token:        '0x66b5A93f977168c0DC7f0961653E534450785c94', 
 };
 
 export const CROWDFUNDING_ABI = [
-  // Views
+  // ── Views ──
   'function campaignCount() view returns (uint256)',
-  'function getCampaign(uint256) view returns (tuple(string supabaseId, address organizer, uint256 goalAmount, uint256 deadline, uint256 totalRaisedEth, uint256 totalRaisedFdy, bool withdrawn, bool cancelled, bool hasExtraToken, uint256 extraTokenAmount, uint256 extraTokenMinDonate))',
-  'function getEthDonation(uint256, address) view returns (uint256)',
-  'function getFdyDonation(uint256, address) view returns (uint256)',
-  'function getDonors(uint256) view returns (address[])',
-  'function totalRaised(uint256) view returns (uint256)',
-  'function isGoalReached(uint256) view returns (bool)',
-  'function isRefundable(uint256) view returns (bool)',
-  'function admins(address) view returns (bool)', 
-  // Write
-  'function createCampaign(string, uint256, uint256, string, uint256, uint256) returns (uint256)',
-  'function donate(uint256) payable',
-  'function donateWithFdy(uint256, uint256)',
-  'function withdraw(uint256)',
-  'function claimRefund(uint256)',
-  'function cancelCampaign(uint256)',
-  'function buyFdy() payable',
-  'function triggerExpiredRefunds(uint256)',
-  'function addAdmin(address)',
-  'function removeAdmin(address)',
-  // Events
-  'event CampaignCreated(uint256 indexed campaignId, string supabaseId, address organizer, uint256 goal, uint256 deadline)',
-  'event DonationReceived(uint256 indexed campaignId, address indexed donor, uint256 ethAmount, uint256 fdyMinted)',
-  'event ExtraFdyAwarded(uint256 indexed campaignId, address indexed donor, uint256 fdyAmount)',
-  'event FdyDonation(uint256 indexed campaignId, address indexed donor, uint256 fdyBurned, uint256 ethEquivalent)',
-  'event FundsWithdrawn(uint256 indexed campaignId, address organizer, uint256 ethAmount, uint256 fdyEquivalent)',
+  'function initialized() view returns (bool)',
+  'function owner() view returns (address)',
+  'function admins(address) view returns (bool)',
+  'function TOKENS_PER_ETH() view returns (uint256)',
+
+  `function getCampaign(uint256 id) view returns (
+    tuple(
+      string  supabaseId,
+      address organizer,
+      uint256 goalAmount,
+      uint256 deadline,
+      uint256 totalRaisedEth,
+      bool    withdrawn,
+      bool    cancelled,
+      address stakeToken,
+      string  tokenSymbol,
+      bool    hasExtraToken,
+      uint256 extraQuantity,
+      uint256 extraFdyAmount,
+      uint256 extraMinDonate,
+      uint256 extraAwarded
+    )
+  )`,
+
+  'function getEthDonation(uint256 id, address donor) view returns (uint256)',
+  'function getDonors(uint256 id) view returns (address[])',
+  'function totalRaised(uint256 id) view returns (uint256)',
+  'function isGoalReached(uint256 id) view returns (bool)',
+  'function isRefundable(uint256 id) view returns (bool)',
+  'function stakeBalance(uint256 id, address donor) view returns (uint256)',
+  'function totalStake(uint256 id) view returns (uint256)',
+  'function estimatedExtraCost(uint256 id) view returns (uint256)',
+  'function getExtraRewardInfo(uint256 id) view returns (bool hasExtra, uint256 quantity, uint256 fdyAmount, uint256 minDonate, uint256 slotsRemaining)',
+  'function isDonor(uint256, address) view returns (bool)',
+  'function extraAwarded(uint256, address) view returns (bool)',
+  'function donors(uint256, uint256) view returns (address)',
+
+  // ── Write ──
+  // 7 params: supabaseId, goalWei, deadline, campaignTitle, extraQuantity, extraFdyAmount, extraMinDonate
+  'function createCampaign(string supabaseId, uint256 goalWei, uint256 deadline, string campaignTitle, uint256 extraQuantity, uint256 extraFdyAmount, uint256 extraMinDonate) returns (uint256)',
+  'function init()',
+  'function donate(uint256 campaignId) payable',
+  'function withdraw(uint256 campaignId)',
+  'function claimRefund(uint256 campaignId)',
+  'function cancelCampaign(uint256 campaignId)',
+  'function triggerExpiredRefunds(uint256 campaignId)',
+  'function addAdmin(address admin)',
+  'function removeAdmin(address admin)',
+  'function transferOwnership(address newOwner)',
+
+  // ── Events ──
+  'event CampaignCreated(uint256 indexed campaignId, string supabaseId, address organizer, uint256 goal, uint256 deadline, address stakeToken, string tokenSymbol)',
+  'event DonationReceived(uint256 indexed campaignId, address indexed donor, uint256 ethAmount)',
+  'event FundsWithdrawn(uint256 indexed campaignId, address organizer, uint256 ethPaid, uint256 autoTokensMinted, uint256 extraTokensMinted)',
   'event EthRefundIssued(uint256 indexed campaignId, address indexed donor, uint256 amount)',
-  'event FdyRefundIssued(uint256 indexed campaignId, address indexed donor, uint256 fdyAmount)',
   'event CampaignCancelled(uint256 indexed campaignId)',
-  
+  'event Initialized(address indexed caller)',
 ];
 
-export const TOKEN_ABI = [
+// CampaignStakeToken ABI (per-campaign token)
+export const STAKE_TOKEN_ABI = [
   'function balanceOf(address) view returns (uint256)',
+  'function totalSupply() view returns (uint256)',
+  'function symbol() view returns (string)',
+  'function name() view returns (string)',
+  'function transfer(address, uint256) returns (bool)',
   'function allowance(address, address) view returns (uint256)',
   'function approve(address, uint256) returns (bool)',
-  'function TOKENS_PER_ETH() view returns (uint256)',
-  'function fdyToEth(uint256) view returns (uint256)',
 ];
 
-export const NFT_ABI = [
-  'function balanceOf(address) view returns (uint256)',
-  'function tokenOfOwnerByIndex(address, uint256) view returns (uint256)',
-  'function tokenURI(uint256) view returns (string)',
-  'function campaignNftUri(uint256) view returns (string)',
-  'function totalMinted() view returns (uint256)',
+// CampaignStakeTokenFactory ABI
+export const FACTORY_ABI = [
+  'function deploy(uint256 campaignId, string campaignTitle, address crowdfunding) returns (address)',
+  'event TokenDeployed(uint256 indexed campaignId, address tokenAddress, string name, string symbol)',
 ];
+
+// ── Types ────────────────────────────────────────────────────────
+export interface OnChainCampaign {
+  supabaseId:    string;
+  organizer:     string;
+  goalAmount:    bigint;
+  deadline:      bigint;
+  totalRaisedEth: bigint;
+  withdrawn:     boolean;
+  cancelled:     boolean;
+  stakeToken:    string;
+  tokenSymbol:   string;
+  hasExtraToken: boolean;
+  extraQuantity: bigint;
+  extraFdyAmount: bigint;
+  extraMinDonate: bigint;
+  extraAwarded:  bigint;
+}
 
 interface Web3ContextType {
-  provider:      ethers.BrowserProvider | null;
-  signer:        ethers.JsonRpcSigner | null;
-  address:       string | null;
-  chainId:       number | null;
-  fdyBalance:    string;
-  ethBalance:    string;
-  isConnected:   boolean;
-  isConnecting:  boolean;
-  error:         string | null;
-  connect:       () => Promise<void>;
-  disconnect:    () => void;
+  provider:       ethers.BrowserProvider | null;
+  signer:         ethers.JsonRpcSigner | null;
+  address:        string | null;
+  chainId:        number | null;
+  ethBalance:     string;
+  isConnected:    boolean;
+  isConnecting:   boolean;
+  error:          string | null;
+
+  connect:        () => Promise<void>;
+  disconnect:     () => void;
   refreshBalance: () => Promise<void>;
+
+  // Admin
   addAdmin:    (address: string) => Promise<void>;
   removeAdmin: (address: string) => Promise<void>;
-  createCampaignOnChain: (
-    supabaseId: string, goalEth: string, deadlineTs: number,
-    nftUri: string, extraFdyAmount: string, extraFdyMinDonate: string
-  ) => Promise<number>;
-  donateEth:          (onChainId: number, amountEth: string) => Promise<any>;
-  donateWithFdy:      (onChainId: number, fdyAmount: string) => Promise<any>;
-  withdrawFunds:      (onChainId: number) => Promise<any>;
-  claimRefund:        (onChainId: number) => Promise<any>;
-  cancelCampaignOnChain: (onChainId: number) => Promise<any>;
-  getCampaignOnChain: (onChainId: number) => Promise<any>;
-  getDonationAmount:  (onChainId: number, donor: string) => Promise<string>;
-  approveExtraFdy:    (amount: string) => Promise<void>;
-  buyFdy:             (ethAmount: string) => Promise<void>;
-  checkFdyBalance:    (requiredFdy: string) => Promise<boolean>;
 
+  // Campaign
+  createCampaignOnChain: (
+    supabaseId:     string,
+    goalEth:        string,   // e.g. "10.5" — will be converted to wei internally
+    deadlineTs:     number,   // unix timestamp
+    campaignTitle:  string,
+    extraQuantity:  string,   // "0" if none
+    extraFdyAmount: string,   // tokens (whole number), e.g. "200" — converted to 18-decimal internally
+    extraMinDonate: string,   // ETH, e.g. "1" — converted to wei internally
+  ) => Promise<number>;
+
+  donateEth:             (onChainId: number, amountEth: string) => Promise<any>;
+  withdrawFunds:         (onChainId: number) => Promise<any>;
+  claimRefund:           (onChainId: number) => Promise<any>;
+  cancelCampaignOnChain: (onChainId: number) => Promise<any>;
+  getCampaignOnChain:    (onChainId: number) => Promise<OnChainCampaign>;
+  getDonationAmount:     (onChainId: number, donor: string) => Promise<string>;
+
+  // Stake token helpers
+  getStakeBalance:       (onChainId: number, donor: string) => Promise<string>;
+  getTotalStake:         (onChainId: number) => Promise<string>;
+  getEstimatedExtraCost: (onChainId: number) => Promise<string>;
 }
 
 const Web3Context = createContext<Web3ContextType | null>(null);
 
+// ── Balance helper ───────────────────────────────────────────────
 async function getBalances(prov: ethers.BrowserProvider, addr: string) {
   const ethBal = await prov.getBalance(addr);
-  let fdy = '0';
-  try {
-    if (CONTRACT_ADDRESSES.token !== '0x0000000000000000000000000000000000000000') {
-      const tk = new ethers.Contract(CONTRACT_ADDRESSES.token, TOKEN_ABI, prov);
-      fdy = Number(ethers.formatEther(await tk.balanceOf(addr))).toFixed(2);
-    }
-  } catch {}
-  return { eth: Number(ethers.formatEther(ethBal)).toFixed(4), fdy };
+  return { eth: Number(ethers.formatEther(ethBal)).toFixed(4) };
 }
 
+// ── Provider ─────────────────────────────────────────────────────
 export function Web3Provider({
   children, userId, boundWalletAddress,
 }: {
@@ -114,22 +166,25 @@ export function Web3Provider({
   const [signer,       setSigner]       = useState<ethers.JsonRpcSigner | null>(null);
   const [address,      setAddress]      = useState<string | null>(null);
   const [chainId,      setChainId]      = useState<number | null>(null);
-  const [fdyBalance,   setFdyBalance]   = useState('0');
   const [ethBalance,   setEthBalance]   = useState('0');
   const [isConnected,  setIsConnected]  = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [error,        setError]        = useState<string | null>(null);
 
-  const applyBalances = (bal: { eth: string; fdy: string }) => {
-    setEthBalance(bal.eth); setFdyBalance(bal.fdy);
-  };
+  const applyBalances = (bal: { eth: string }) => setEthBalance(bal.eth);
 
-  const setConnected = (prov: ethers.BrowserProvider, sgn: ethers.JsonRpcSigner, addr: string, chain: number, bal: { eth: string; fdy: string }) => {
+  const setConnected = (
+    prov: ethers.BrowserProvider,
+    sgn: ethers.JsonRpcSigner,
+    addr: string,
+    chain: number,
+    bal: { eth: string },
+  ) => {
     setProvider(prov); setSigner(sgn); setAddress(addr);
     setChainId(chain); setIsConnected(true); applyBalances(bal);
   };
 
-  // ── Auto-reconnect to bound wallet (no popup) ───────────────
+  // ── Auto-reconnect to bound wallet (no popup) ──────────────────
   useEffect(() => {
     if (!boundWalletAddress || !window.ethereum || isConnected) return;
     (async () => {
@@ -145,9 +200,9 @@ export function Web3Provider({
       } catch {}
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [boundWalletAddress, isConnected]);
+  }, [boundWalletAddress, isConnected]);
 
-  // ── Connect ────────────────────────────────────────────────
+  // ── Connect ────────────────────────────────────────────────────
   const connect = useCallback(async () => {
     if (!window.ethereum) { setError('MetaMask not detected. Please install MetaMask.'); return; }
     setIsConnecting(true); setError(null);
@@ -156,13 +211,11 @@ export function Web3Provider({
       const prov = new ethers.BrowserProvider(window.ethereum);
 
       if (boundWalletAddress) {
-        // Account already bound — just connect to it
         await prov.send('eth_requestAccounts', []);
         const sgn  = await prov.getSigner();
         const addr = await sgn.getAddress();
-
         if (addr.toLowerCase() !== boundWalletAddress.toLowerCase()) {
-          setError(`Wrong wallet. Please switch MetaMask to: ${boundWalletAddress.slice(0,10)}...${boundWalletAddress.slice(-6)}`);
+          setError(`Wrong wallet. Please switch MetaMask to: ${boundWalletAddress.slice(0, 10)}...${boundWalletAddress.slice(-6)}`);
           return;
         }
         const network = await prov.getNetwork();
@@ -182,7 +235,6 @@ export function Web3Provider({
       const sgn  = await prov.getSigner();
       const addr = await sgn.getAddress();
 
-      // Sign to verify ownership
       try {
         const msg = `Welcome to Fundy!\n\nSigning this message verifies you own this wallet.\n\nWallet: ${addr}\nTimestamp: ${Date.now()}`;
         await sgn.signMessage(msg);
@@ -194,7 +246,6 @@ export function Web3Provider({
       const bal     = await getBalances(prov, addr);
       setConnected(prov, sgn, addr, Number(network.chainId), bal);
 
-      // Bind wallet to profile
       if (userId) {
         await supabase.from('profiles').update({ wallet_address: addr }).eq('id', userId);
       }
@@ -207,7 +258,7 @@ export function Web3Provider({
 
   const disconnect = useCallback(() => {
     setProvider(null); setSigner(null); setAddress(null); setChainId(null);
-    setFdyBalance('0'); setEthBalance('0'); setIsConnected(false); setError(null);
+    setEthBalance('0'); setIsConnected(false); setError(null);
   }, []);
 
   const refreshBalance = useCallback(async () => {
@@ -216,7 +267,7 @@ export function Web3Provider({
     applyBalances(bal);
   }, [provider, address]);
 
-  // MetaMask events
+  // ── MetaMask events ────────────────────────────────────────────
   useEffect(() => {
     if (!window.ethereum) return;
     const onAccounts = (accounts: string[]) => {
@@ -238,82 +289,130 @@ export function Web3Provider({
     };
   }, [disconnect, provider, boundWalletAddress]);
 
-  // ── Contract getters ────────────────────────────────────────
-  const cf  = useCallback((w = false) => {
+  // ── Contract getters ────────────────────────────────────────────
+  const cf = useCallback((write = false) => {
     if (!provider) throw new Error('Wallet not connected');
-    return new ethers.Contract(CONTRACT_ADDRESSES.crowdfunding, CROWDFUNDING_ABI, w ? signer! : provider);
+    return new ethers.Contract(
+      CONTRACT_ADDRESSES.crowdfunding,
+      CROWDFUNDING_ABI,
+      write ? signer! : provider,
+    );
   }, [provider, signer]);
 
-  const tk = useCallback((w = false) => {
-    if (!provider) throw new Error('Wallet not connected');
-    return new ethers.Contract(CONTRACT_ADDRESSES.token, TOKEN_ABI, w ? signer! : provider);
-  }, [provider, signer]);
+  // ── Contract actions ────────────────────────────────────────────
 
-  // ── Contract actions ────────────────────────────────────────
   const createCampaignOnChain = useCallback(async (
-    supabaseId: string, goalEth: string, deadlineTs: number,
-    nftUri: string, extraFdyAmount: string, extraFdyMinDonate: string,
+    supabaseId:     string,
+    goalEth:        string,
+    deadlineTs:     number,
+    campaignTitle:  string,
+    extraQuantity:  string,
+    extraFdyAmount: string,
+    extraMinDonate: string,
   ): Promise<number> => {
-    const extraFdyWei  = extraFdyAmount ? ethers.parseEther(extraFdyAmount) : 0n;
-    const extraMinWei  = extraFdyMinDonate ? ethers.parseEther(extraFdyMinDonate) : 0n;
-    const tx      = await cf(true).createCampaign(supabaseId, ethers.parseEther(goalEth), deadlineTs, nftUri, extraFdyWei, extraMinWei);
+    const goalWei      = ethers.parseEther(goalEth);                      
+    const extraQty     = BigInt(extraQuantity || '0');                        
+    const extraFdyWei  = extraFdyAmount && extraFdyAmount !== '0'
+      ? ethers.parseEther(extraFdyAmount) 
+      : 0n;
+    const extraMinWei  = extraMinDonate && extraMinDonate !== '0'
+      ? ethers.parseEther(extraMinDonate)   // ETH → wei
+      : 0n;
+
+    const tx = await cf(true).createCampaign(
+      supabaseId,
+      goalWei,
+      deadlineTs,
+      campaignTitle,
+      extraQty,
+      extraFdyWei,
+      extraMinWei,
+    );
     const receipt = await tx.wait();
-    const iface   = new ethers.Interface(CROWDFUNDING_ABI);
+
+    const iface = new ethers.Interface(CROWDFUNDING_ABI);
     for (const log of receipt.logs) {
-      try { const p = iface.parseLog(log); if (p?.name === 'CampaignCreated') return Number(p.args.campaignId); } catch {}
+      try {
+        const parsed = iface.parseLog(log);
+        if (parsed?.name === 'CampaignCreated') return Number(parsed.args.campaignId);
+      } catch {}
     }
-    throw new Error('CampaignCreated event not found');
+    throw new Error('CampaignCreated event not found in receipt');
   }, [cf]);
 
   const donateEth = useCallback(async (id: number, amtEth: string) => {
     const tx = await cf(true).donate(id, { value: ethers.parseEther(amtEth) });
-    const r  = await tx.wait(); await refreshBalance(); return r;
-  }, [cf, refreshBalance]);
-
-  const donateWithFdy = useCallback(async (id: number, fdyAmt: string) => {
-    const wei = ethers.parseEther(fdyAmt);
-    // Must approve first
-    const approveTx = await tk(true).approve(CONTRACT_ADDRESSES.crowdfunding, wei);
-    await approveTx.wait();
-    const tx = await cf(true).donateWithFdy(id, wei);
-    const r  = await tx.wait(); await refreshBalance(); return r;
-  }, [cf, tk, refreshBalance]);
-
-  const approveExtraFdy = useCallback(async (amount: string) => {
-    const wei = ethers.parseEther(amount);
-    const tx  = await tk(true).approve(CONTRACT_ADDRESSES.crowdfunding, wei);
-    await tx.wait();
-  }, [tk]);
-
-  const buyFdy = useCallback(async (ethAmount: string) => {
-    const tx = await cf(true).buyFdy({ value: ethers.parseEther(ethAmount) });
-    await tx.wait();
+    const r  = await tx.wait();
     await refreshBalance();
+    return r;
   }, [cf, refreshBalance]);
 
-  const checkFdyBalance = useCallback(async (requiredFdy: string): Promise<boolean> => {
-    if (!address) return false;
-    const bal = await tk().balanceOf(address);
-    const required = ethers.parseEther(requiredFdy);
-    return bal >= required;
-  }, [tk, address]);
+  const withdrawFunds = useCallback(async (id: number) => {
+    const tx = await cf(true).withdraw(id);
+    return tx.wait();
+  }, [cf]);
 
-  const withdrawFunds         = useCallback(async (id: number) => (await (await cf(true).withdraw(id)).wait()), [cf]);
-  const claimRefund           = useCallback(async (id: number) => (await (await cf(true).claimRefund(id)).wait()), [cf]);
-  const cancelCampaignOnChain = useCallback(async (id: number) => (await (await cf(true).cancelCampaign(id)).wait()), [cf]);
-  const getCampaignOnChain    = useCallback(async (id: number) => await cf().getCampaign(id), [cf]);
-  const getDonationAmount     = useCallback(async (id: number, donor: string) => ethers.formatEther(await cf().getEthDonation(id, donor)), [cf]);
-  const addAdmin    = useCallback(async (addr: string) => { const tx = await cf(true).addAdmin(addr); await tx.wait(); }, [cf]);
-  const removeAdmin = useCallback(async (addr: string) => { const tx = await cf(true).removeAdmin(addr); await tx.wait(); }, [cf]);
+  const claimRefund = useCallback(async (id: number) => {
+    const tx = await cf(true).claimRefund(id);
+    return tx.wait();
+  }, [cf]);
+
+  const cancelCampaignOnChain = useCallback(async (id: number) => {
+    const tx = await cf(true).cancelCampaign(id);
+    return tx.wait();
+  }, [cf]);
+
+  const getCampaignOnChain = useCallback(async (id: number): Promise<OnChainCampaign> => {
+    return cf().getCampaign(id);
+  }, [cf]);
+
+  const getDonationAmount = useCallback(async (id: number, donor: string): Promise<string> => {
+    const wei = await cf().getEthDonation(id, donor);
+    return ethers.formatEther(wei);
+  }, [cf]);
+
+  const getStakeBalance = useCallback(async (id: number, donor: string): Promise<string> => {
+    const wei = await cf().stakeBalance(id, donor);
+    return ethers.formatEther(wei);
+  }, [cf]);
+
+  const getTotalStake = useCallback(async (id: number): Promise<string> => {
+    const wei = await cf().totalStake(id);
+    return ethers.formatEther(wei);
+  }, [cf]);
+
+  const getEstimatedExtraCost = useCallback(async (id: number): Promise<string> => {
+    const wei = await cf().estimatedExtraCost(id);
+    return ethers.formatEther(wei);
+  }, [cf]);
+
+  const addAdmin = useCallback(async (addr: string) => {
+    const tx = await cf(true).addAdmin(addr);
+    await tx.wait();
+  }, [cf]);
+
+  const removeAdmin = useCallback(async (addr: string) => {
+    const tx = await cf(true).removeAdmin(addr);
+    await tx.wait();
+  }, [cf]);
+
   return (
     <Web3Context.Provider value={{
-      provider, signer, address, chainId, fdyBalance, ethBalance,
+      provider, signer, address, chainId, ethBalance,
       isConnected, isConnecting, error,
       connect, disconnect, refreshBalance,
-      createCampaignOnChain, donateEth, donateWithFdy,
-      withdrawFunds, claimRefund, cancelCampaignOnChain,
-      getCampaignOnChain, getDonationAmount, approveExtraFdy,
-      buyFdy, checkFdyBalance, addAdmin, removeAdmin,
+      createCampaignOnChain,
+      donateEth,
+      withdrawFunds,
+      claimRefund,
+      cancelCampaignOnChain,
+      getCampaignOnChain,
+      getDonationAmount,
+      getStakeBalance,
+      getTotalStake,
+      getEstimatedExtraCost,
+      addAdmin,
+      removeAdmin,
     }}>
       {children}
     </Web3Context.Provider>

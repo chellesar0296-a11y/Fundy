@@ -8,6 +8,7 @@ import {
 import { useAuth } from '@/hooks/useAuth';
 import { useNavigate } from 'react-router-dom';
 import { ROUTE_PATHS } from '@/lib/index';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -19,12 +20,11 @@ import {
 } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import {
-  supabase,
-  fetchVerificationRequests,
   processVerificationRequest,
   cancelCampaignWithReason,
   updateReportStatus,
   fetchReports,
+  fetchVerificationRequests,
   DbVerificationRequest,
   DbReport,
   fetchCancelRequests,
@@ -69,6 +69,27 @@ interface AdminReward {
   token_amount: number | null;
 }
 
+// ── Supabase manual fetch helper ──────────────────────────────
+const dbFetch = async (path: string, method: string = 'GET', body?: object) => {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      'apikey': SUPABASE_ANON_KEY,
+      'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+      'Prefer': 'return=representation',
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message ?? `Request failed: ${res.status}`);
+  }
+  // DELETE returns 204 no content
+  if (res.status === 204) return null;
+  return res.json();
+};
+
 // ── Stat card ─────────────────────────────────────────────────
 function StatCard({ title, value, icon: Icon, color = 'text-primary', loading = false }: {
   title: string; value: string | number; icon: React.ElementType; color?: string; loading?: boolean;
@@ -96,7 +117,7 @@ function CancelCampaignDialog({
   onClose: () => void;
   onCancelled: (id: string) => void;
 }) {
-  const { cancelCampaignOnChain, isConnected, connect } = useWeb3(); // ← ADD
+  const { cancelCampaignOnChain, isConnected, connect } = useWeb3();
   const [reason, setReason] = useState('');
   const [confirmed, setConfirmed] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
@@ -122,7 +143,14 @@ function CancelCampaignDialog({
           await cancelCampaignOnChain(Number(campaign.on_chain_id));
           toast.success('On-chain cancel done — ETH refunded to donors!');
         } catch (chainErr: any) {
-          toast.error('On-chain cancel failed: ' + (chainErr.message ?? 'unknown'));
+          // Check if it's a user rejection
+          if (chainErr.code === 4001 ||
+            chainErr.message?.includes('User rejected') ||
+            chainErr.message?.includes('denied transaction signature')) {
+            toast.error('Transaction cancelled - you rejected the signature request');
+          } else {
+            toast.error('Transaction failed: ' + (chainErr.message?.split('\n')[0] || 'unknown error'));
+          }
           setIsCancelling(false);
           return;
         }
@@ -337,7 +365,7 @@ function CancelRequestReviewDialog({
   onProcessed: (id: string, action: 'approved' | 'rejected') => void;
 }) {
   const { user } = useAuth();
-  const { cancelCampaignOnChain, addAdmin, isConnected, connect, address } = useWeb3();
+  const { cancelCampaignOnChain } = useWeb3();
   const [adminNote, setAdminNote] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
 
@@ -352,14 +380,25 @@ function CancelRequestReviewDialog({
     try {
       if (action === 'approved' && campaign?.on_chain_id) {
         try {
+          console.log('🔄 Cancelling on-chain campaign:', campaign.on_chain_id);
           await cancelCampaignOnChain(Number(campaign.on_chain_id));
+          console.log('✅ On-chain cancellation successful');
+          toast.success('On-chain cancellation confirmed');
         } catch (chainErr: any) {
-          toast.error('On-chain cancel failed: ' + (chainErr.message ?? 'unknown error'));
+          console.error('❌ On-chain error:', chainErr);
+          if (chainErr.code === 4001 ||
+            chainErr.message?.includes('User rejected') ||
+            chainErr.message?.includes('denied transaction signature')) {
+            toast.error('Transaction cancelled - you rejected the signature');
+          } else {
+            toast.error('On-chain cancel failed: ' + (chainErr.message?.split('\n')[0] || 'unknown error'));
+          }
           setIsProcessing(false);
           return;
         }
       }
 
+      console.log('📝 Updating database...');
       await processCancelRequest(
         request.id,
         request.campaign_id,
@@ -369,19 +408,24 @@ function CancelRequestReviewDialog({
         organizer?.email,
         campaign?.title,
       );
+      console.log('✅ Database updated successfully');
 
-      onProcessed(request.id, action);
+      // IMPORTANT: Call onProcessed FIRST to refresh parent data
+      await onProcessed(request.id, action);
+
+      // THEN close the dialog
       onClose();
+
       toast.success(action === 'approved'
-        ? 'Campaign cancelled on-chain and organizer notified.'
+        ? 'Campaign cancellation request approved and processed!'
         : 'Cancel request rejected. Organizer notified.');
     } catch (err: any) {
+      console.error('❌ Error in handle function:', err);
       toast.error(err.message ?? 'Failed to process request');
     } finally {
       setIsProcessing(false);
     }
   };
-
   return (
     <Dialog open={!!request} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-lg">
@@ -569,8 +613,7 @@ export default function AdminDashboard() {
   const [selectedVerification, setSelectedVerification] = useState<DbVerificationRequest | null>(null);
   const [cancelTarget, setCancelTarget] = useState<AdminCampaign | null>(null);
   const [selectedCancelRequest, setSelectedCancelRequest] = useState<DbCancelRequest | null>(null);
-
-  // User management state
+  const [pendingReportId, setPendingReportId] = useState<string | null>(null);
   const [roleToggleTarget, setRoleToggleTarget] = useState<AdminUser | null>(null);
   const [userSearch, setUserSearch] = useState('');
   const [userRoleFilter, setUserRoleFilter] = useState<'all' | 'donor' | 'organizer' | 'admin'>('all');
@@ -589,11 +632,9 @@ export default function AdminDashboard() {
   const loadCampaigns = useCallback(async () => {
     setLoadingCampaigns(true);
     try {
-      const { data, error } = await supabase
-        .from('campaigns')
-        .select('id, title, status, current_amount, goal_amount, donor_count, created_at, on_chain_id, profiles(name, email, is_verified)')
-        .order('created_at', { ascending: false });
-      if (error) throw error;
+      const data = await dbFetch(
+        'campaigns?select=id,title,status,current_amount,goal_amount,donor_count,created_at,on_chain_id,profiles(name,email,is_verified)&order=created_at.desc'
+      );
       setCampaigns((data ?? []).map((c: any) => ({
         id: c.id,
         title: c.title,
@@ -617,17 +658,17 @@ export default function AdminDashboard() {
   const loadUsers = useCallback(async () => {
     setLoadingUsers(true);
     try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('id, name, email, role, created_at, is_verified, verification_status')
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      const { data: donationData } = await supabase.from('donations').select('donor_id');
+      const [profileData, donationData] = await Promise.all([
+        dbFetch('profiles?select=id,name,email,role,created_at,is_verified,verification_status&order=created_at.desc'),
+        dbFetch('donations?select=donor_id'),
+      ]);
+
       const counts: Record<string, number> = {};
       (donationData ?? []).forEach((d: any) => {
         if (d.donor_id) counts[d.donor_id] = (counts[d.donor_id] ?? 0) + 1;
       });
-      setUsers((data ?? []).map((u: any) => ({
+
+      setUsers((profileData ?? []).map((u: any) => ({
         id: u.id,
         name: u.name,
         email: u.email,
@@ -647,11 +688,9 @@ export default function AdminDashboard() {
   const loadRewards = useCallback(async () => {
     setLoadingRewards(true);
     try {
-      const { data, error } = await supabase
-        .from('rewards')
-        .select('id, status, type, token_amount, campaigns(title), profiles:donor_id(name)')
-        .order('created_at', { ascending: false });
-      if (error) throw error;
+      const data = await dbFetch(
+        'rewards?select=id,status,type,token_amount,campaigns(title),profiles:donor_id(name)&order=created_at.desc'
+      );
       setRewards((data ?? []).map((r: any) => ({
         id: r.id,
         donor_name: r.profiles?.name ?? 'Unknown',
@@ -707,37 +746,47 @@ export default function AdminDashboard() {
       return;
     }
     const newStatus = action === 'approve' ? 'active' : 'draft';
-    const { error } = await supabase
-      .from('campaigns')
-      .update({ status: newStatus, updated_at: new Date().toISOString() })
-      .eq('id', id);
-    if (error) { toast.error(error.message); return; }
-    setCampaigns(prev => prev.map(c => c.id === id ? { ...c, status: newStatus } : c));
-    toast.success(action === 'approve' ? 'Campaign approved.' : 'Campaign suspended.');
+    try {
+      await dbFetch(
+        `campaigns?id=eq.${id}`,
+        'PATCH',
+        { status: newStatus, updated_at: new Date().toISOString() }
+      );
+      setCampaigns(prev => prev.map(c => c.id === id ? { ...c, status: newStatus } : c));
+      toast.success(action === 'approve' ? 'Campaign approved.' : 'Campaign suspended.');
+    } catch (err: any) {
+      toast.error(err.message);
+    }
   };
 
   const handleMintReward = async (id: string) => {
-    const { error } = await supabase
-      .from('rewards')
-      .update({ status: 'minted', minted_at: new Date().toISOString() })
-      .eq('id', id);
-    if (error) { toast.error(error.message); return; }
-    setRewards(prev => prev.map(r => r.id === id ? { ...r, status: 'minted' } : r));
-    toast.success('Reward minted.');
+    try {
+      await dbFetch(
+        `rewards?id=eq.${id}`,
+        'PATCH',
+        { status: 'minted', minted_at: new Date().toISOString() }
+      );
+      setRewards(prev => prev.map(r => r.id === id ? { ...r, status: 'minted' } : r));
+      toast.success('Reward minted.');
+    } catch (err: any) {
+      toast.error(err.message);
+    }
   };
 
-  // Opens confirmation dialog
   const handleToggleUserRole = (u: AdminUser) => {
     setRoleToggleTarget(u);
   };
 
-  // Actual role change — called after dialog confirmation
   const confirmToggleUserRole = async (u: AdminUser) => {
     const newRole = u.role === 'donor' ? 'organizer' : 'donor';
-    const { error } = await supabase.from('profiles').update({ role: newRole }).eq('id', u.id);
-    if (error) { toast.error(error.message); throw error; }
-    setUsers(prev => prev.map(x => x.id === u.id ? { ...x, role: newRole } : x));
-    toast.success(`${u.name} is now a${newRole === 'organizer' ? 'n' : ''} ${newRole}.`);
+    try {
+      await dbFetch(`profiles?id=eq.${u.id}`, 'PATCH', { role: newRole });
+      setUsers(prev => prev.map(x => x.id === u.id ? { ...x, role: newRole } : x));
+      toast.success(`${u.name} is now a${newRole === 'organizer' ? 'n' : ''} ${newRole}.`);
+    } catch (err: any) {
+      toast.error(err.message);
+      throw err;
+    }
   };
 
   const handleReportAction = async (
@@ -746,11 +795,13 @@ export default function AdminDashboard() {
     campaignId?: string,
   ) => {
     try {
-      await updateReportStatus(reportId, action);
-      setReports(prev => prev.map(r => r.id === reportId ? { ...r, status: action } : r));
       if (action === 'reviewed' && campaignId) {
         setCancelTarget(campaigns.find(x => x.id === campaignId) ?? null);
+        setPendingReportId(reportId);
+        return;
       }
+      await updateReportStatus(reportId, action);
+      setReports(prev => prev.map(r => r.id === reportId ? { ...r, status: action } : r));
       if (action === 'dismissed') toast.success('Report dismissed.');
     } catch (err: any) {
       toast.error(err.message ?? 'Failed to update report');
@@ -798,10 +849,9 @@ export default function AdminDashboard() {
     completed: 'bg-blue-100 text-blue-700',
     draft: 'bg-slate-100 text-slate-600',
     cancelled: 'bg-red-100 text-red-600',
-      expired:   'bg-orange-100 text-orange-600', 
+    expired: 'bg-orange-100 text-orange-600',
   };
 
-  // ── Filtered users ─────────────────────────────────────────
   const filteredUsers = users.filter(u => {
     const matchesSearch = !userSearch ||
       u.name.toLowerCase().includes(userSearch.toLowerCase()) ||
@@ -963,7 +1013,7 @@ export default function AdminDashboard() {
                                   <div className="space-y-1 min-w-[120px]">
                                     <Progress value={pct} className="h-1.5" />
                                     <p className="text-xs text-muted-foreground">
-                                      {pct}% · RM{c.current_amount.toLocaleString()} / RM{c.goal_amount.toLocaleString()}
+                                      {pct}% · {c.current_amount.toLocaleString()} ETH / {c.goal_amount.toLocaleString()} ETH
                                     </p>
                                   </div>
                                 </td>
@@ -1009,7 +1059,6 @@ export default function AdminDashboard() {
                       Manage roles and view activity for all registered users.
                     </CardDescription>
                   </div>
-                  {/* Search */}
                   <div className="relative w-full sm:w-64 shrink-0">
                     <input
                       type="text"
@@ -1027,7 +1076,6 @@ export default function AdminDashboard() {
                     </svg>
                   </div>
                 </div>
-                {/* Role filter pills */}
                 <div className="flex flex-wrap gap-2 mt-3">
                   {(['all', 'donor', 'organizer', 'admin'] as const).map((role) => (
                     <button
@@ -1072,7 +1120,6 @@ export default function AdminDashboard() {
                             <th className="px-4 py-3 text-left font-medium">Verification</th>
                             <th className="px-4 py-3 text-center font-medium">Donations</th>
                             <th className="px-4 py-3 text-left font-medium">Joined</th>
-                            <th className="px-4 py-3 text-left font-medium">Change Role</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1080,10 +1127,8 @@ export default function AdminDashboard() {
                             const initials = u.name
                               ? u.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()
                               : '?';
-                            const newRole = u.role === 'donor' ? 'organizer' : 'donor';
                             return (
                               <tr key={u.id} className="border-b hover:bg-muted/30 transition-colors">
-                                {/* User cell */}
                                 <td className="px-4 py-3">
                                   <div className="flex items-center gap-3">
                                     <div className="w-8 h-8 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center shrink-0 select-none">
@@ -1095,7 +1140,6 @@ export default function AdminDashboard() {
                                     </div>
                                   </div>
                                 </td>
-                                {/* Role */}
                                 <td className="px-4 py-3">
                                   <Badge
                                     variant={u.role === 'admin' ? 'default' : u.role === 'organizer' ? 'secondary' : 'outline'}
@@ -1104,7 +1148,6 @@ export default function AdminDashboard() {
                                     {u.role}
                                   </Badge>
                                 </td>
-                                {/* Verification */}
                                 <td className="px-4 py-3">
                                   {u.is_verified ? (
                                     <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
@@ -1118,7 +1161,6 @@ export default function AdminDashboard() {
                                     <span className="text-xs text-muted-foreground">—</span>
                                   )}
                                 </td>
-                                {/* Donations */}
                                 <td className="px-4 py-3 text-center">
                                   {u.donation_count > 0 ? (
                                     <span className="inline-flex items-center justify-center text-xs font-semibold bg-primary/10 text-primary px-2 py-0.5 rounded-full min-w-[24px]">
@@ -1128,24 +1170,8 @@ export default function AdminDashboard() {
                                     <span className="text-xs text-muted-foreground">0</span>
                                   )}
                                 </td>
-                                {/* Joined */}
                                 <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
                                   {new Date(u.joined).toLocaleDateString()}
-                                </td>
-                                {/* Change role */}
-                                <td className="px-4 py-3">
-                                  {u.role !== 'admin' ? (
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      className="text-xs h-7 px-2.5 gap-1.5"
-                                      onClick={() => handleToggleUserRole(u)}
-                                    >
-                                      → <span className="capitalize">{newRole}</span>
-                                    </Button>
-                                  ) : (
-                                    <span className="text-xs text-muted-foreground italic">Admin</span>
-                                  )}
                                 </td>
                               </tr>
                             );
@@ -1468,7 +1494,14 @@ export default function AdminDashboard() {
       <CancelCampaignDialog
         campaign={cancelTarget}
         onClose={() => setCancelTarget(null)}
-        onCancelled={(id) => setCampaigns(prev => prev.map(c => c.id === id ? { ...c, status: 'cancelled' } : c))}
+        onCancelled={async (id) => {
+          setCampaigns(prev => prev.map(c => c.id === id ? { ...c, status: 'cancelled' } : c));
+          if (pendingReportId) {
+            await updateReportStatus(pendingReportId, 'reviewed');
+            setReports(prev => prev.map(r => r.id === pendingReportId ? { ...r, status: 'reviewed' } : r));
+            setPendingReportId(null);
+          }
+        }}
       />
       <VerificationDialog
         request={selectedVerification}
@@ -1480,11 +1513,42 @@ export default function AdminDashboard() {
       <CancelRequestReviewDialog
         request={selectedCancelRequest}
         onClose={() => setSelectedCancelRequest(null)}
-        onProcessed={(id, action) => {
-          setCancelRequests(prev => prev.map(r => r.id === id ? { ...r, status: action } : r));
-          if (action === 'approved') {
-            const req = cancelRequests.find(r => r.id === id);
-            if (req) setCampaigns(prev => prev.map(c => c.id === req.campaign_id ? { ...c, status: 'cancelled' } : c));
+        onProcessed={async (id, action) => {
+          console.log('🔄 Refreshing data after processing request:', id, action);
+
+          try {
+            // Force refresh cancel requests from database
+            const freshCancelRequests = await fetchCancelRequests();
+            console.log('Fresh cancel requests:', freshCancelRequests);
+            setCancelRequests(freshCancelRequests);
+
+            // Force refresh campaigns
+            const freshCampaigns = await dbFetch(
+              'campaigns?select=id,title,status,current_amount,goal_amount,donor_count,created_at,on_chain_id,profiles(name,email,is_verified)&order=created_at.desc'
+            );
+            setCampaigns(freshCampaigns.map((c: any) => ({
+              id: c.id,
+              title: c.title,
+              status: c.status,
+              current_amount: Number(c.current_amount),
+              goal_amount: Number(c.goal_amount),
+              donor_count: c.donor_count,
+              organizer_name: c.profiles?.name ?? '—',
+              organizer_email: c.profiles?.email ?? '',
+              organizer_verified: c.profiles?.is_verified ?? false,
+              created_at: c.created_at,
+              on_chain_id: c.on_chain_id ?? null,
+            })));
+
+            // Update pending counts in stats
+            // The stats will automatically update because they depend on the state
+
+            toast.success(action === 'approved'
+              ? 'Cancel request approved - campaign cancelled'
+              : 'Cancel request rejected');
+          } catch (err) {
+            console.error('Failed to refresh data:', err);
+            toast.error('Failed to refresh data, please refresh manually');
           }
         }}
       />

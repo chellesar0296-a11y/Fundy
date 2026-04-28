@@ -15,6 +15,37 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   },
 });
 
+async function dbFetch(path: string, method = 'GET', body?: object) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      'apikey': SUPABASE_ANON_KEY,
+      'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+      'Prefer': 'return=representation',
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  if (res.status === 204) return null;
+  const json = await res.json();
+  if (!res.ok) throw new Error(json?.message ?? `DB error ${res.status}`);
+  return json;
+}
+async function invokeFn(fnName: string, body: object) {
+  try {
+    await fetch(`${SUPABASE_URL}/functions/v1/${fnName}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+      },
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    // Email failures are non-fatal — log and continue
+    console.error(`[invokeFn:${fnName}] failed:`, err);
+  }
+}
 // ── DB types ─────────────────────────────────────────────────
 
 export interface DbProfile {
@@ -340,14 +371,28 @@ export async function submitVerificationRequest(request: {
   if (error) throw error;
   return data as DbVerificationRequest;
 }
+export async function fetchVerificationRequests(): Promise<DbVerificationRequest[]> {
+  console.log('🔄 Fetching verification requests...');
 
-export async function fetchVerificationRequests() {
   const { data, error } = await supabase
     .from('verification_requests')
-    .select('*, profiles(name, email, avatar_url)')
+    .select(`
+      *,
+      profiles (
+        name,
+        email,
+        avatar_url
+      )
+    `)
     .order('created_at', { ascending: false });
-  if (error) throw error;
-  return data as DbVerificationRequest[];
+
+  if (error) {
+    console.error('❌ Error fetching verification requests:', error);
+    return [];
+  }
+
+  console.log('✅ Fetched verification requests:', data?.length);
+  return (data ?? []) as DbVerificationRequest[];
 }
 
 export async function fetchUserVerificationRequest(userId: string) {
@@ -367,9 +412,11 @@ export async function processVerificationRequest(
   action: 'approved' | 'rejected',
   adminNote?: string,
   userId?: string,
-) {
-  // Update the request status
-  const { error: reqError } = await supabase
+): Promise<void> {
+  console.log('🔄 Processing verification request:', requestId, action);
+
+  // 1. Update verification_requests row using Supabase client
+  const { error: requestError } = await supabase
     .from('verification_requests')
     .update({
       status: action,
@@ -377,26 +424,29 @@ export async function processVerificationRequest(
       updated_at: new Date().toISOString(),
     })
     .eq('id', requestId);
-  if (reqError) throw reqError;
 
-  // If approved, update the profile is_verified flag
-  if (action === 'approved' && userId) {
+  if (requestError) {
+    console.error('❌ Error updating verification request:', requestError);
+    throw requestError;
+  }
+  console.log('✅ Verification request updated');
+
+  // 2. Update profiles
+  if (userId) {
     const { error: profileError } = await supabase
       .from('profiles')
-      .update({
-        is_verified: true,
-        verification_status: 'approved',
-      })
+      .update(
+        action === 'approved'
+          ? { is_verified: true, verification_status: 'approved' }
+          : { verification_status: 'rejected' }
+      )
       .eq('id', userId);
-    if (profileError) throw profileError;
-  } else if (action === 'rejected' && userId) {
-    const { error: profileError } = await supabase
-      .from('profiles')
-      .update({
-        verification_status: 'rejected',
-      })
-      .eq('id', userId);
-    if (profileError) throw profileError;
+
+    if (profileError) {
+      console.error('❌ Error updating profile:', profileError);
+      throw profileError;
+    }
+    console.log('✅ Profile updated');
   }
 }
 
@@ -426,21 +476,50 @@ export async function submitReport(report: {
   if (error) throw error;
 }
 
-export async function fetchReports() {
+export async function fetchReports(): Promise<DbReport[]> {
+  console.log('🔄 Fetching reports with Supabase client...');
+
   const { data, error } = await supabase
     .from('reports')
-    .select('*, campaigns(title, organizer_id), profiles:reporter_id(name, email)')
+    .select(`
+      *,
+      campaigns (
+        title,
+        organizer_id
+      ),
+      profiles!reporter_id (
+        name,
+        email
+      )
+    `)
     .order('created_at', { ascending: false });
-  if (error) throw error;
-  return data as DbReport[];
+
+  if (error) {
+    console.error('❌ Error fetching reports:', error);
+    return [];
+  }
+
+  console.log('✅ Fetched reports:', data?.length);
+  return (data ?? []) as DbReport[];
 }
 
-export async function updateReportStatus(reportId: string, status: DbReport['status']) {
+export async function updateReportStatus(
+  reportId: string,
+  status: DbReport['status'],
+): Promise<void> {
+  console.log('🔄 Updating report status:', reportId, status);
+
   const { error } = await supabase
     .from('reports')
     .update({ status })
     .eq('id', reportId);
-  if (error) throw error;
+
+  if (error) {
+    console.error('❌ Error updating report:', error);
+    throw error;
+  }
+
+  console.log('✅ Report status updated');
 }
 
 // ── Cancel campaign with reason + email ───────────────────────
@@ -450,78 +529,155 @@ export async function cancelCampaignWithReason(
   reason: string,
   organizerEmail: string,
   campaignTitle: string,
-) {
-  // 1. Update campaign status
-  const { error } = await supabase
-    .from('campaigns')
-    .update({ status: 'cancelled', updated_at: new Date().toISOString() })
-    .eq('id', campaignId);
-  if (error) throw error;
+): Promise<void> {
+  console.log('=== cancelCampaignWithReason START ===');
+  console.log('Campaign ID:', campaignId);
+  console.log('Reason:', reason);
 
-  // 2. Get organizer_id
-  const { data: campaign } = await supabase
-    .from('campaigns')
-    .select('organizer_id')
-    .eq('id', campaignId)
-    .single();
-
-  // 3. In-app notify organizer
-  if (campaign?.organizer_id) {
-    await supabase.from('notifications').insert({
-      user_id: campaign.organizer_id,
-      type: 'campaign_cancelled',
-      title: 'Your Campaign Was Cancelled',
-      message: `"${campaignTitle}" has been cancelled by an admin. Reason: ${reason}`,
-      campaign_id: campaignId,
-      is_read: false,
-      email_sent: false,
-    });
-  }
-
-  // 4. In-app notify all donors
-  const { data: donations } = await supabase
-    .from('donations')
-    .select('donor_id')
-    .eq('campaign_id', campaignId)
-    .not('donor_id', 'is', null);
-
-  if (donations?.length) {
-    const uniqueDonorIds = [...new Set(donations.map((d: any) => d.donor_id))];
-    await supabase.from('notifications').insert(
-      uniqueDonorIds.map((donorId) => ({
-        user_id: donorId,
-        type: 'campaign_cancelled',
-        title: 'Campaign Cancelled',
-        message: `The campaign "${campaignTitle}" was cancelled by an admin. Your donation has been automatically refunded to your wallet.`,
-        campaign_id: campaignId,
-        is_read: false,
-        email_sent: false,
-      }))
-    );
-  }
-
-  // 5. Email organizer (existing)
   try {
-    await supabase.functions.invoke('send-email', {
-      body: {
+    // 1. Cancel campaign using Supabase client
+    const { error: campaignError } = await supabase
+      .from('campaigns')
+      .update({
+        status: 'cancelled',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', campaignId);
+
+    if (campaignError) {
+      console.error('❌ Campaign update error:', campaignError);
+      throw campaignError;
+    }
+    console.log('✅ Campaign cancelled in database');
+
+    // 2. Get organizer_id
+    const { data: campaignData, error: fetchError } = await supabase
+      .from('campaigns')
+      .select('organizer_id')
+      .eq('id', campaignId)
+      .single();
+
+    if (fetchError) {
+      console.error('❌ Error fetching campaign:', fetchError);
+    }
+
+    // 3. In-app notify organizer
+    if (campaignData?.organizer_id) {
+      const { error: notifError } = await supabase
+        .from('notifications')
+        .insert({
+          user_id: campaignData.organizer_id,
+          type: 'campaign_cancelled',
+          title: 'Campaign Cancelled by Admin',
+          message: `Your campaign "${campaignTitle}" has been cancelled due to policy violations or reports. Please contact support if you believe this is a mistake.`,
+          campaign_id: campaignId,
+          is_read: false,
+          email_sent: false,
+        });
+
+      if (notifError) {
+        console.error('❌ Notification error:', notifError);
+      } else {
+        console.log('✅ Notification sent to organizer');
+      }
+    }
+
+    // 4. Get donors for notifications
+    const { data: donations, error: donationsError } = await supabase
+      .from('donations')
+      .select('donor_id')
+      .eq('campaign_id', campaignId)
+      .not('donor_id', 'is', null);
+
+    if (donationsError) {
+      console.error('❌ Error fetching donations:', donationsError);
+    }
+
+    if (donations && donations.length > 0) {
+      const uniqueDonorIds = [...new Set(donations.map((d: any) => d.donor_id))];
+
+      const { error: donorNotifError } = await supabase
+        .from('notifications')
+        .insert(
+          uniqueDonorIds.map((donorId) => ({
+            user_id: donorId,
+            type: 'campaign_cancelled',
+            title: 'Campaign Cancelled Due to Safety Concerns',
+            message: `The campaign "${campaignTitle}" was cancelled after review. Refunds have been automatically processed to your wallet.`,
+            campaign_id: campaignId,
+            is_read: false,
+            email_sent: false,
+          }))
+        );
+
+      if (donorNotifError) {
+        console.error('❌ Donor notification error:', donorNotifError);
+      } else {
+        console.log('✅ Notifications sent to donors');
+      }
+    }
+
+    // 5. Email organizer (non-fatal)
+    if (organizerEmail && campaignTitle) {
+      await invokeFn('send-email', {
         to: organizerEmail,
         subject: `Your campaign "${campaignTitle}" has been cancelled`,
         html: `
           <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
             <h2 style="color:#ef4444">Campaign Cancelled</h2>
             <p>Hi,</p>
-            <p>Your campaign <strong>"${campaignTitle}"</strong> has been reviewed by our team and has been cancelled for the following reason:</p>
-            <blockquote style="border-left:4px solid #ef4444;padding:12px 16px;background:#fef2f2;border-radius:4px;margin:16px 0">
-              ${reason}
-            </blockquote>
+            <p>Your campaign <strong>"${campaignTitle}"</strong> has been reviewed and cancelled for the following reason:</p>
+            <blockquote style="border-left:4px solid #ef4444;padding:12px 16px;background:#fef2f2;border-radius:4px;margin:16px 0">${reason}</blockquote>
             <p>If you believe this was a mistake, please contact our support team.</p>
             <p style="color:#6b7280;font-size:14px">— The Fundy Team</p>
           </div>
         `,
-      },
-    });
-  } catch (emailErr) {
-    console.error('[send-email] failed:', emailErr);
+      });
+      console.log('✅ Email sent to organizer');
+    }
+
+    // 6. Email donors (non-fatal, fire-and-forget)
+    if (donations && donations.length > 0 && campaignTitle) {
+      // Get donor profiles with emails
+      const donorIds = [...new Set(donations.map((d: any) => d.donor_id))];
+
+      const { data: donorProfiles, error: donorError } = await supabase
+        .from('profiles')
+        .select('email, name')
+        .in('id', donorIds);
+
+      if (!donorError && donorProfiles) {
+        const contacts = donorProfiles.map((profile: any) => ({
+          email: profile.email,
+          name: profile.name ?? 'Donor',
+        }));
+
+        await Promise.allSettled(
+          contacts.map(({ email, name }) =>
+            invokeFn('send-email', {
+              to: email,
+              subject: `Update: "${campaignTitle}" has been cancelled`,
+              html: `
+                <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
+                  <h2 style="color:#ef4444">Campaign Cancelled Due to Safety Concerns</h2>
+                  <p>Hi ${name},</p>
+                  <p>A campaign you donated to — <strong>"${campaignTitle}"</strong> — has been cancelled by our admin team.</p>
+                  <blockquote style="border-left:4px solid #ef4444;padding:12px 16px;background:#fef2f2;border-radius:4px;margin:16px 0">${reason}</blockquote>
+                  <p>The campaign was cancelled after review. Refunds have been automatically processed to your wallet.</p>
+                  <p style="color:#6b7280;font-size:14px">— The Fundy Team</p>
+                </div>
+              `,
+            })
+          )
+        );
+        console.log('✅ Emails sent to donors');
+      }
+    }
+
+    console.log('=== cancelCampaignWithReason COMPLETED SUCCESSFULLY ===');
+  } catch (error) {
+    console.error('❌ Error in cancelCampaignWithReason:', error);
+    throw error;
   }
 }
 
@@ -589,15 +745,34 @@ export async function submitCancelRequest(
 
 /** Admin: fetch all cancel requests. */
 export async function fetchCancelRequests(): Promise<DbCancelRequest[]> {
+  console.log('🔄 Fetching cancel requests with Supabase client...');
+
   const { data, error } = await supabase
     .from('cancel_requests')
-    .select('*, campaigns(title, organizer_id, on_chain_id, status), profiles:organizer_id(name, email)')
+    .select(`
+      *,
+      campaigns (
+        title,
+        organizer_id,
+        on_chain_id,
+        status
+      ),
+      profiles!cancel_requests_organizer_id_fkey (
+        name,
+        email
+      )
+    `)
     .order('created_at', { ascending: false });
-  if (error) throw error;
-  return data as DbCancelRequest[];
+
+  if (error) {
+    console.error('❌ Error fetching cancel requests:', error);
+    return [];
+  }
+
+  console.log('✅ Fetched cancel requests:', data?.length);
+  return (data ?? []) as DbCancelRequest[];
 }
 
-/** Organizer: fetch their own campaign's cancel request. */
 export async function fetchMyCancelRequest(campaignId: string): Promise<DbCancelRequest | null> {
   const { data, error } = await supabase
     .from('cancel_requests')
@@ -610,11 +785,6 @@ export async function fetchMyCancelRequest(campaignId: string): Promise<DbCancel
   return data as DbCancelRequest | null;
 }
 
-/**
- * Admin: approve or reject a cancel request.
- * On approval, also sets campaign status = 'cancelled' and sends email.
- * The admin still needs to call cancelCampaignOnChain() from the UI after approving.
- */
 export async function processCancelRequest(
   requestId: string,
   campaignId: string,
@@ -624,126 +794,105 @@ export async function processCancelRequest(
   organizerEmail?: string,
   campaignTitle?: string,
 ): Promise<void> {
-  // Update request status
-  const { error: reqErr } = await supabase
-    .from('cancel_requests')
-    .update({
-      status: action,
-      admin_note: adminNote ?? null,
-      reviewed_by: reviewerId,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', requestId);
-  if (reqErr) throw reqErr;
+  console.log('=== processCancelRequest START ===');
+  console.log('Request ID:', requestId);
+  console.log('Action:', action);
 
-  // Get organizer_id
-  const { data: campaign } = await supabase
-    .from('campaigns')
-    .select('organizer_id')
-    .eq('id', campaignId)
-    .single();
+  try {
+    // 1. Update cancel_requests using Supabase client
+    const { error: updateError } = await supabase
+      .from('cancel_requests')
+      .update({
+        status: action,
+        admin_note: adminNote ?? null,
+        reviewed_by: reviewerId,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', requestId);
 
-  if (action === 'approved') {
-    // Mark campaign as cancelled
-    const { error: campErr } = await supabase
-      .from('campaigns')
-      .update({ status: 'cancelled', updated_at: new Date().toISOString() })
-      .eq('id', campaignId);
-    if (campErr) throw campErr;
-
-    // In-app notify organizer (approved)
-    if (campaign?.organizer_id && campaignTitle) {
-      await supabase.from('notifications').insert({
-        user_id: campaign.organizer_id,
-        type: 'campaign_cancelled',
-        title: 'Your Campaign Was Cancelled',
-        message: `The campaign "${campaignTitle}" was cancelled by the Admin.`,
-        campaign_id: campaignId,
-        is_read: false,
-        email_sent: false,
-      });
+    if (updateError) {
+      console.error('❌ Update error:', updateError);
+      throw updateError;
     }
+    console.log('✅ Cancel request updated');
 
-    // In-app notify all donors (refund available)
-    const { data: donations } = await supabase
-      .from('donations')
-      .select('donor_id')
-      .eq('campaign_id', campaignId)
-      .not('donor_id', 'is', null);
+    if (action === 'approved') {
+      // 2. Update campaign status to cancelled
+      const { error: campaignError } = await supabase
+        .from('campaigns')
+        .update({
+          status: 'cancelled',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', campaignId);
 
-    if (donations?.length && campaignTitle) {
-      const uniqueDonorIds = [...new Set(donations.map((d: any) => d.donor_id))];
-      await supabase.from('notifications').insert(
-        uniqueDonorIds.map((donorId) => ({
-          user_id: donorId,
+      if (campaignError) {
+        console.error('❌ Campaign update error:', campaignError);
+      } else {
+        console.log('✅ Campaign updated to cancelled');
+      }
+
+      // 3. Get organizer_id for notifications
+      const { data: campaignData } = await supabase
+        .from('campaigns')
+        .select('organizer_id')
+        .eq('id', campaignId)
+        .single();
+
+      // 4. Send notifications (keeping your existing notification code)
+      if (campaignData?.organizer_id && campaignTitle) {
+        await supabase.from('notifications').insert({
+          user_id: campaignData.organizer_id,
           type: 'campaign_cancelled',
-          title: 'Campaign Cancelled',
-          message: `The campaign "${campaignTitle}" was cancelled. Your donation has been automatically refunded to your wallet.`,
+          title: 'Your Cancel Request Was Approved',
+          message: `Your request to cancel "${campaignTitle}" has been approved. The campaign is now closed.`,
           campaign_id: campaignId,
           is_read: false,
           email_sent: false,
-        }))
-      );
-    }
-
-    // Email organizer (existing)
-    if (organizerEmail && campaignTitle) {
-      try {
-        await supabase.functions.invoke('send-email', {
-          body: {
-            to: organizerEmail,
-            subject: `Your cancel request for "${campaignTitle}" was approved`,
-            html: `
-              <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
-                <h2 style="color:#ef4444">Campaign Cancelled</h2>
-                <p>Your request to cancel <strong>"${campaignTitle}"</strong> has been approved.</p>
-                ${adminNote ? `<blockquote style="border-left:4px solid #ef4444;padding:12px 16px;background:#fef2f2;border-radius:4px;margin:16px 0">${adminNote}</blockquote>` : ''}
-                <p>Donors will be able to claim ETH refunds on-chain. FDY tokens already earned are kept.</p>
-                <p style="color:#6b7280;font-size:14px">— The Fundy Team</p>
-              </div>
-            `,
-          },
         });
-      } catch (emailErr) {
-        console.error('[send-email] failed:', emailErr);
+        console.log('✅ Notification sent to organizer');
+      }
+
+      // 5. Email organizer (keep your existing email code)
+      if (organizerEmail && campaignTitle) {
+        await invokeFn('send-email', {
+          to: organizerEmail,
+          subject: `Your cancel request for "${campaignTitle}" was approved`,
+          html: `
+            <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
+              <h2 style="color:#ef4444">Campaign Cancelled</h2>
+              <p>Your request to cancel <strong>"${campaignTitle}"</strong> has been approved.</p>
+              ${adminNote ? `<blockquote style="border-left:4px solid #ef4444;padding:12px 16px;background:#fef2f2;border-radius:4px;margin:16px 0">${adminNote}</blockquote>` : ''}
+              <p>Donors will be able to claim ETH refunds on-chain.</p>
+              <p style="color:#6b7280;font-size:14px">— The Fundy Team</p>
+            </div>
+          `,
+        });
+        console.log('✅ Email sent to organizer');
+      }
+    } else {
+      // For rejected requests, send rejection notification
+      if (organizerEmail && campaignTitle) {
+        await invokeFn('send-email', {
+          to: organizerEmail,
+          subject: `Your cancel request for "${campaignTitle}" was rejected`,
+          html: `
+            <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
+              <h2 style="color:#f59e0b">Cancel Request Rejected</h2>
+              <p>Your request to cancel <strong>"${campaignTitle}"</strong> has been reviewed and rejected.</p>
+              ${adminNote ? `<blockquote style="border-left:4px solid #f59e0b;padding:12px 16px;background:#fffbeb;border-radius:4px;margin:16px 0">${adminNote}</blockquote>` : ''}
+              <p>Your campaign remains active. If you have further concerns, please contact support.</p>
+              <p style="color:#6b7280;font-size:14px">— The Fundy Team</p>
+            </div>
+          `,
+        });
+        console.log('✅ Rejection email sent');
       }
     }
 
-  } else {
-    // In-app notify organizer (rejected)
-    if (campaign?.organizer_id && campaignTitle) {
-      await supabase.from('notifications').insert({
-        user_id: campaign.organizer_id,
-        type: 'campaign_cancelled',
-        title: 'Cancellation Request Rejected',
-        message: `Your request to cancel "${campaignTitle}" was rejected.${adminNote ? ' Reason: ' + adminNote : ''}`,
-        campaign_id: campaignId,
-        is_read: false,
-        email_sent: false,
-      });
-    }
-
-    // Email organizer (existing)
-    if (organizerEmail && campaignTitle) {
-      try {
-        await supabase.functions.invoke('send-email', {
-          body: {
-            to: organizerEmail,
-            subject: `Your cancel request for "${campaignTitle}" was rejected`,
-            html: `
-              <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
-                <h2 style="color:#f59e0b">Cancel Request Rejected</h2>
-                <p>Your request to cancel <strong>"${campaignTitle}"</strong> has been reviewed and rejected.</p>
-                ${adminNote ? `<blockquote style="border-left:4px solid #f59e0b;padding:12px 16px;background:#fffbeb;border-radius:4px;margin:16px 0">${adminNote}</blockquote>` : ''}
-                <p>Your campaign remains active. If you have further concerns, please contact support.</p>
-                <p style="color:#6b7280;font-size:14px">— The Fundy Team</p>
-              </div>
-            `,
-          },
-        });
-      } catch (emailErr) {
-        console.error('[send-email] failed:', emailErr);
-      }
-    }
+    console.log('=== processCancelRequest COMPLETED SUCCESSFULLY ===');
+  } catch (error) {
+    console.error('❌ Error in processCancelRequest:', error);
+    throw error;
   }
 }

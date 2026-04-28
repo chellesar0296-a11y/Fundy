@@ -742,7 +742,7 @@ export default function Dashboard() {
                               <span className={`font-semibold ${tx.type === 'refunded' ? 'text-emerald-600' : 'text-slate-800'
                                 }`}>
                                 {tx.type === 'refunded' ? '+ ' : '- '}
-                                {Number(tx.amount).toFixed(5)} ETH
+                                {Number(tx.amount).toFixed(4)} ETH
                               </span>
                               {tx.type !== 'refunded' && (() => {
                                 const alreadyRefunded = onChainTxs.some(

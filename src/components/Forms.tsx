@@ -17,7 +17,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Form,
   FormControl,
@@ -40,12 +39,11 @@ type DonationValues = z.infer<typeof donationSchema>;
 export function DonationForm({ campaign, onClose }: { campaign: Campaign; onClose?: () => void }) {
   const { t } = useLanguage();
   const { user } = useAuth();
-  const { isConnected, address, connect, donateEth, donateWithFdy, fdyBalance, refreshBalance, provider } = useWeb3();
+  const { isConnected, address, connect, donateEth, refreshBalance, provider } = useWeb3();
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [balance, setBalance] = useState("0");
   const [selectedPreset, setSelectedPreset] = useState<number | null>(null);
-  const [payMethod, setPayMethod] = useState<'eth' | 'fdy'>('eth');
   const [txHash, setTxHash] = useState<string | null>(null);
   useEffect(() => {
     if (!isConnected || !address || !provider) return;
@@ -87,7 +85,6 @@ export function DonationForm({ campaign, onClose }: { campaign: Campaign; onClos
     try {
       const amountEth = values.amount.toFixed(6);
 
-      // campaign.onChainId must exist — set when organizer creates campaign on-chain
       const onChainId = (campaign as any).onChainId as number | undefined;
       if (!onChainId) {
         toast.error('This campaign has not been registered on-chain yet. Please contact the organizer.');
@@ -95,20 +92,7 @@ export function DonationForm({ campaign, onClose }: { campaign: Campaign; onClos
         return;
       }
 
-      let receipt: any;
-
-      if (payMethod === 'eth') {
-        receipt = await donateEth(onChainId, amountEth);
-      } else {
-        toast.info('Using FDY helps this campaign reach its goal faster. FDY will be burned.');
-        const fdyAmount = (Number(amountEth) * 100).toFixed(2);
-        if (Number(fdyBalance) < Number(fdyAmount)) {
-          toast.error(`Insufficient FDY. You have ${Number(fdyBalance).toFixed(2)} FDY, need ${fdyAmount} FDY.`);
-          setIsSubmitting(false);
-          return;
-        }
-        receipt = await donateWithFdy(onChainId, fdyAmount);
-      }
+      const receipt = await donateEth(onChainId, amountEth);
 
       // Save to Supabase
       await submitDonation({
@@ -190,7 +174,6 @@ export function DonationForm({ campaign, onClose }: { campaign: Campaign; onClos
   }
 
   const watchAmount = form.watch('amount') || 0;
-  const fdyEquiv = (watchAmount * 100).toFixed(2);
 
   return (
     <motion.div
@@ -208,21 +191,11 @@ export function DonationForm({ campaign, onClose }: { campaign: Campaign; onClos
         </div>
       </div>
 
-      {/* Payment method */}
-      <Tabs value={payMethod} onValueChange={(v) => setPayMethod(v as 'eth' | 'fdy')}>
-        <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="eth" className="gap-1.5">
-            <span className="text-base">⟠</span> Pay with ETH
-          </TabsTrigger>
-          <TabsTrigger value="fdy" className="gap-1.5">
-            <Coins className="w-3.5 h-3.5" /> Pay with FDY
-            <span className="text-[10px] text-muted-foreground ml-1">({Number(fdyBalance).toFixed(0)})</span>
-          </TabsTrigger>
-        </TabsList>
-        <p className="text-[10px] text-muted-foreground text-center mt-2">
-          {payMethod === 'fdy' ? '✨ Using FDY helps campaign reach goal · FDY will be burned' : null}
-        </p>
-      </Tabs>
+      {/* Payment method: ETH only */}
+      <div className="p-3 bg-muted/40 rounded-xl text-xs text-muted-foreground flex items-center gap-2">
+        <span className="text-base">⟠</span>
+        <span>Donations are made in ETH. You'll receive this campaign's stake tokens as reward.</span>
+      </div>
 
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5">
@@ -244,11 +217,10 @@ export function DonationForm({ campaign, onClose }: { campaign: Campaign; onClos
               <FormItem>
                 <FormControl>
                   <div className="relative">
-                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground font-bold text-sm">⟠ </span>
                     <Input
                       type="number"
                       min="0.0001"
-                      step="any"         
+                      step="any"
                       className="pl-12 h-14 text-xl font-bold"
                       {...field}
                       onChange={(e) => {
@@ -263,9 +235,7 @@ export function DonationForm({ campaign, onClose }: { campaign: Campaign; onClos
                 <FormMessage />
               </FormItem>
             )} />
-            <p className="text-xs text-right text-muted-foreground">
-              {payMethod === 'eth' ? 'Paying in ETH' : `≈ ${fdyEquiv} FDY`}
-            </p>
+            <p className="text-xs text-right text-muted-foreground">Paying in ETH</p>
           </div>
 
           {/* Message */}
@@ -304,9 +274,6 @@ export function DonationForm({ campaign, onClose }: { campaign: Campaign; onClos
               <span className="flex items-center gap-2">
                 <Heart className="h-5 w-5 fill-current" />
                 Donate {watchAmount} ETH
-                <span className="text-sm opacity-80">
-                  ({payMethod === 'fdy' ? `${fdyEquiv} FDY` : 'ETH'})
-                </span>
               </span>
             )}
           </Button>

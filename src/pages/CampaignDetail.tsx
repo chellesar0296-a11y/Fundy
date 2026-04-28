@@ -373,17 +373,18 @@ export default function CampaignDetail() {
                 {/* Rewards tab */}
                 <TabsContent value="rewards">
                   <div className="space-y-4">
-                    {/* Always-on FDY reward */}
+                    {/* Always-on stake token reward */}
                     <div className="p-5 bg-blue-50 border border-blue-200 rounded-xl">
                       <p className="font-semibold text-blue-800 flex items-center gap-2 mb-1">
-                        🪙 Automatic FDY Token Reward <span className="text-xs font-normal bg-blue-100 px-2 py-0.5 rounded-full">Always active</span>
+                        🪙 Automatic Stake Token Reward <span className="text-xs font-normal bg-blue-100 px-2 py-0.5 rounded-full">Always active</span>
                       </p>
                       <p className="text-sm text-blue-700">
-                        Every donor automatically receives FDY tokens — <strong>1 ETH donated = 100 FDY</strong>. FDY can be used to donate on Fundy.
+                        Every donor automatically receives this campaign's unique stake token — <strong>1 ETH donated = 100 tokens</strong>.
+                        Tokens are minted when the organizer withdraws and are freely transferable on any platform.
                       </p>
                     </div>
 
-                    {/* Extra FDY reward — read from on-chain */}
+                    {/* Extra stake token reward — read from on-chain */}
                     {campaign.onChainId ? (
                       <ExtraFdyRewardCard onChainId={campaign.onChainId} />
                     ) : (
@@ -637,50 +638,139 @@ export default function CampaignDetail() {
   );
 }
 
-// ── Extra FDY Reward Card — reads live from chain ─────────────
+// ── Extra Stake Token Reward Card — reads live from chain ─────────────
+
+// ── Extra Stake Token Reward Card — reads live from chain, calculates remaining slots correctly ──
 
 function ExtraFdyRewardCard({ onChainId }: { onChainId: number }) {
   const { provider } = useWeb3();
-  const [info, setInfo] = React.useState<{ hasExtra: boolean; amount: string; minDonate: string } | null>(null);
+  const [info, setInfo] = React.useState<{
+    hasExtra: boolean;
+    quantity: number;
+    fdyAmount: string;
+    minDonate: string;
+    slotsTaken: number;   
+    slotsRemaining: number;  
+    tokenSymbol: string;
+  } | null>(null);
+  const [loading, setLoading] = React.useState(true);
 
   React.useEffect(() => {
     if (!provider || !onChainId) return;
+    
+    let cancelled = false;
+    setLoading(true);
+    
     (async () => {
       try {
         const contract = new ethers.Contract(CONTRACT_ADDRESSES.crowdfunding, CROWDFUNDING_ABI, provider);
-        const c = await contract.getCampaign(onChainId);
-        setInfo({
-          hasExtra: c.hasExtraToken,
-          amount: ethers.formatEther(c.extraTokenAmount),
-          minDonate: Number(ethers.formatEther(c.extraTokenMinDonate)).toFixed(4),
-        });
-      } catch { }
+
+        const [campaign, extra] = await Promise.all([
+          contract.getCampaign(onChainId),
+          contract.getExtraRewardInfo(onChainId),
+        ]);
+        
+        const extraQuantity = Number(extra.quantity);
+
+        if (!extra.hasExtra || extraQuantity === 0) {
+          if (!cancelled) {
+            setInfo({
+              hasExtra: false,
+              quantity: 0,
+              fdyAmount: '0',
+              minDonate: '0',
+              slotsTaken: 0,
+              slotsRemaining: 0,
+              tokenSymbol: campaign.tokenSymbol || 'FDY',
+            });
+            setLoading(false);
+          }
+          return;
+        }
+        
+ 
+        const donorsList = await contract.getDonors(onChainId);
+        
+
+        const minDonateWei = extra.minDonate;
+        
+        const qualifiedDonors = await Promise.all(
+          donorsList.map(async (donor: string) => {
+            const donationWei = await contract.getEthDonation(onChainId, donor);
+            const alreadyAwarded = await contract.extraAwarded(onChainId, donor);
+
+            return donationWei >= minDonateWei && !alreadyAwarded;
+          })
+        );
+
+        const slotsTaken = qualifiedDonors.filter(Boolean).length;
+        const slotsRemaining = Math.max(0, extraQuantity - slotsTaken);
+        
+        if (!cancelled) {
+          setInfo({
+            hasExtra: extra.hasExtra,
+            quantity: extraQuantity,
+            fdyAmount: ethers.formatEther(extra.fdyAmount),
+            minDonate: Number(ethers.formatEther(extra.minDonate)).toFixed(4),
+            slotsTaken: slotsTaken,
+            slotsRemaining: slotsRemaining,
+            tokenSymbol: campaign.tokenSymbol || 'FDY',
+          });
+        }
+      } catch (err) {
+        console.error('[ExtraFdyRewardCard]', err);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     })();
+    
+    return () => { cancelled = true; };
   }, [provider, onChainId]);
 
-  if (!info) return (
+  if (loading) return (
     <div className="p-5 border rounded-xl flex items-center gap-3 text-muted-foreground text-sm">
       <Loader2 className="w-4 h-4 animate-spin" /> Loading reward info...
     </div>
   );
 
-  if (!info.hasExtra) return (
+  if (!info || !info.hasExtra) return (
     <div className="p-5 border border-dashed rounded-xl text-center text-muted-foreground text-sm">
       <Gift className="w-8 h-8 mx-auto mb-2 opacity-20" />
-      No extra FDY reward for this campaign.
+      No extra stake token reward for this campaign.
     </div>
   );
 
+  const isSoldOut = info.slotsRemaining === 0;
+
   return (
-    <div className="p-5 bg-amber-50 border border-amber-200 rounded-xl space-y-2">
-      <p className="font-semibold text-amber-900 flex items-center gap-2">
-        🎁 Extra FDY Token Reward
-        <span className="text-xs font-normal bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Active</span>
+    <div className={`p-5 border rounded-xl space-y-2 ${isSoldOut ? 'bg-muted/30 border-muted' : 'bg-amber-50 border-amber-200'}`}>
+      <p className={`font-semibold flex items-center gap-2 ${isSoldOut ? 'text-muted-foreground' : 'text-amber-900'}`}>
+        🎁 Extra Stake Token Reward
+        {isSoldOut
+          ? <span className="text-xs font-normal bg-muted text-muted-foreground px-2 py-0.5 rounded-full">Sold Out</span>
+          : <span className="text-xs font-normal bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Active</span>
+        }
       </p>
-      <p className="text-sm text-amber-800">
-        Donate <strong>{info.minDonate} ETH+</strong> and receive an extra <strong>{Number(info.amount).toLocaleString()} FDY</strong> tokens on top of the automatic reward.
+      <p className={`text-sm ${isSoldOut ? 'text-muted-foreground line-through' : 'text-amber-800'}`}>
+        The first <strong>{info.quantity}</strong> donors who contribute <strong>≥ {info.minDonate} ETH</strong> each
+        receive an extra <strong>{Number(info.fdyAmount).toLocaleString()} {info.tokenSymbol}</strong> stake tokens.
+        Each donor can only receive this reward once.
       </p>
-      <p className="text-xs text-amber-600">FDY tokens are funded by the campaign organizer and distributed automatically on-chain.</p>
+      <p className={`text-xs font-medium ${isSoldOut ? 'text-muted-foreground' : 'text-amber-700'}`}>
+        {isSoldOut
+          ? 'All extra reward slots have been claimed.'
+          : `${info.slotsRemaining} of ${info.quantity} slots remaining (${info.slotsTaken} claimed)`}
+      </p>
+      
+      {!isSoldOut && info.slotsTaken > 0 && (
+        <p className="text-[10px] text-amber-600">
+          ✅ {info.slotsTaken} donor{info.slotsTaken !== 1 ? 's' : ''} qualified
+        </p>
+      )}
+      
+      <p className="text-[10px] text-muted-foreground mt-2">
+        ⚠️ Extra rewards are minted when the organizer withdraws funds after campaign completion.
+      </p>
     </div>
   );
 }

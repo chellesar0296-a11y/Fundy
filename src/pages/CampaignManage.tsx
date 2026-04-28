@@ -31,57 +31,270 @@ import {
   DbCancelRequest,
 } from '@/lib/supabase';
 
-// ── Extra FDY Reward Card — reads live from chain ─────────────
+// ── Extra Stake Token Reward Card ─────────────────────────────
+// ── Extra Stake Token Reward Card — reads live from chain, calculates remaining slots correctly ──
+
 function ExtraFdyRewardCard({ onChainId }: { onChainId: number }) {
   const { provider } = useWeb3();
-  const [info, setInfo] = React.useState<{ hasExtra: boolean; amount: string; minDonate: string } | null>(null);
+  const [info, setInfo] = React.useState<{
+    hasExtra: boolean;
+    quantity: number;
+    fdyAmount: string;
+    minDonate: string;
+    slotsTaken: number;      // ✅ 实际已领奖人数
+    slotsRemaining: number;   // ✅ 动态计算
+    tokenSymbol: string;
+  } | null>(null);
+  const [loading, setLoading] = React.useState(true);
 
   React.useEffect(() => {
     if (!provider || !onChainId) return;
+    
+    let cancelled = false;
+    setLoading(true);
+    
     (async () => {
       try {
         const contract = new ethers.Contract(CONTRACT_ADDRESSES.crowdfunding, CROWDFUNDING_ABI, provider);
-        const c = await contract.getCampaign(onChainId);
-        setInfo({
-          hasExtra: c.hasExtraToken,
-          amount: ethers.formatEther(c.extraTokenAmount),
-          minDonate: Number(ethers.formatEther(c.extraTokenMinDonate)).toFixed(4),
-        });
-      } catch { }
+        
+        const [campaign, extra] = await Promise.all([
+          contract.getCampaign(onChainId),
+          contract.getExtraRewardInfo(onChainId),
+        ]);
+        
+        const extraQuantity = Number(extra.quantity);
+        
+        if (!extra.hasExtra || extraQuantity === 0) {
+          if (!cancelled) {
+            setInfo({
+              hasExtra: false,
+              quantity: 0,
+              fdyAmount: '0',
+              minDonate: '0',
+              slotsTaken: 0,
+              slotsRemaining: 0,
+              tokenSymbol: campaign.tokenSymbol || 'FDY',
+            });
+            setLoading(false);
+          }
+          return;
+        }
+        
+        const donorsList = await contract.getDonors(onChainId);
+        
+        const minDonateWei = extra.minDonate;
+        
+        const qualifiedDonors = await Promise.all(
+          donorsList.map(async (donor: string) => {
+
+            const donationWei = await contract.getEthDonation(onChainId, donor);
+
+            const alreadyAwarded = await contract.extraAwarded(onChainId, donor);
+            
+
+            return donationWei >= minDonateWei && !alreadyAwarded;
+          })
+        );
+        
+        const slotsTaken = qualifiedDonors.filter(Boolean).length;
+        const slotsRemaining = Math.max(0, extraQuantity - slotsTaken);
+        
+        if (!cancelled) {
+          setInfo({
+            hasExtra: extra.hasExtra,
+            quantity: extraQuantity,
+            fdyAmount: ethers.formatEther(extra.fdyAmount),
+            minDonate: Number(ethers.formatEther(extra.minDonate)).toFixed(4),
+            slotsTaken: slotsTaken,
+            slotsRemaining: slotsRemaining,
+            tokenSymbol: campaign.tokenSymbol || 'FDY',
+          });
+        }
+      } catch (err) {
+        console.error('[ExtraFdyRewardCard]', err);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     })();
+    
+    return () => { cancelled = true; };
   }, [provider, onChainId]);
 
-  if (!info) return (
+  if (loading) return (
     <div className="p-5 border rounded-xl flex items-center gap-3 text-muted-foreground text-sm">
       <Loader2 className="w-4 h-4 animate-spin" /> Loading reward info...
     </div>
   );
 
-  if (!info.hasExtra) return (
+  if (!info || !info.hasExtra) return (
     <div className="p-5 border border-dashed rounded-xl text-center text-muted-foreground text-sm">
       <Gift className="w-8 h-8 mx-auto mb-2 opacity-20" />
-      No extra FDY reward for this campaign.
+      No extra stake token reward for this campaign.
+    </div>
+  );
+
+  const isSoldOut = info.slotsRemaining === 0;
+
+  return (
+    <div className={`p-5 border rounded-xl space-y-2 ${isSoldOut ? 'bg-muted/30 border-muted' : 'bg-amber-50 border-amber-200'}`}>
+      <p className={`font-semibold flex items-center gap-2 ${isSoldOut ? 'text-muted-foreground' : 'text-amber-900'}`}>
+        🎁 Extra Stake Token Reward
+        {isSoldOut
+          ? <span className="text-xs font-normal bg-muted text-muted-foreground px-2 py-0.5 rounded-full">Sold Out</span>
+          : <span className="text-xs font-normal bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Active</span>
+        }
+      </p>
+      <p className={`text-sm ${isSoldOut ? 'text-muted-foreground line-through' : 'text-amber-800'}`}>
+        The first <strong>{info.quantity}</strong> donors who contribute <strong>≥ {info.minDonate} ETH</strong> each
+        receive an extra <strong>{Number(info.fdyAmount).toLocaleString()} {info.tokenSymbol}</strong> stake tokens.
+        Each donor can only receive this reward once.
+      </p>
+      <p className={`text-xs font-medium ${isSoldOut ? 'text-muted-foreground' : 'text-amber-700'}`}>
+        {isSoldOut
+          ? 'All extra reward slots have been claimed.'
+          : `${info.slotsRemaining} of ${info.quantity} slots remaining (${info.slotsTaken} claimed)`}
+      </p>
+      
+      {!isSoldOut && info.slotsTaken > 0 && (
+        <p className="text-[10px] text-amber-600">
+          ✅ {info.slotsTaken} donor{info.slotsTaken !== 1 ? 's' : ''} qualified
+        </p>
+      )}
+      
+      <p className="text-[10px] text-muted-foreground mt-2">
+        ⚠️ Extra rewards are minted when the organizer withdraws funds after campaign completion.
+      </p>
+    </div>
+  );
+}
+// ── Stakeholders Panel ────────────────────────────────────────
+function StakeholdersPanel({ onChainId }: { onChainId: number }) {
+  const { provider } = useWeb3();
+  const [holders, setHolders] = React.useState<{
+    address: string;
+    ethDonated: string;
+    stakeBalance: string;
+    stakePct: string;
+  }[]>([]);
+  const [tokenSymbol, setTokenSymbol] = React.useState('FDY');
+  const [totalStake, setTotalStake] = React.useState('0');
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    if (!provider || !onChainId) return;
+    let cancelled = false;
+    setLoading(true);
+    (async () => {
+      try {
+        const contract = new ethers.Contract(CONTRACT_ADDRESSES.crowdfunding, CROWDFUNDING_ABI, provider);
+        const campaign = await contract.getCampaign(onChainId);
+        const sym = campaign.tokenSymbol || 'FDY';
+        if (!cancelled) setTokenSymbol(sym);
+
+        const donorList: string[] = await contract.getDonors(onChainId);
+        if (donorList.length === 0) {
+          if (!cancelled) { setHolders([]); setLoading(false); }
+          return;
+        }
+
+        const tokenContract = new ethers.Contract(
+          campaign.stakeToken,
+          [
+            'function balanceOf(address) view returns (uint256)',
+            'function totalSupply() view returns (uint256)',
+          ],
+          provider,
+        );
+
+        const [totalSupply, ...balances] = await Promise.all([
+          tokenContract.totalSupply(),
+          ...donorList.map((d: string) => tokenContract.balanceOf(d)),
+        ]);
+
+        const totalNum = Number(ethers.formatEther(totalSupply));
+        if (!cancelled) setTotalStake(totalNum.toLocaleString(undefined, { maximumFractionDigits: 2 }));
+
+        const rows = await Promise.all(donorList.map(async (d: string, i: number) => {
+          const bal = Number(ethers.formatEther(balances[i]));
+          const ethAmt = Number(ethers.formatEther(await contract.getEthDonation(onChainId, d)));
+          const pct = totalNum > 0 ? ((bal / totalNum) * 100).toFixed(2) : '0.00';
+          return {
+            address:      d,
+            ethDonated:   ethAmt.toFixed(4),
+            stakeBalance: bal.toLocaleString(undefined, { maximumFractionDigits: 2 }),
+            stakePct:     pct,
+          };
+        }));
+
+        rows.sort((a, b) => parseFloat(b.stakeBalance.replace(/,/g, '')) - parseFloat(a.stakeBalance.replace(/,/g, '')));
+        if (!cancelled) setHolders(rows);
+      } catch (e) {
+        console.error('[StakeholdersPanel]', e);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [provider, onChainId]);
+
+  if (loading) return (
+    <div className="flex items-center justify-center py-12 text-muted-foreground gap-2">
+      <Loader2 className="w-5 h-5 animate-spin" /> Loading stakeholder data...
+    </div>
+  );
+
+  if (holders.length === 0) return (
+    <div className="text-center py-10 text-muted-foreground text-sm space-y-2">
+      <p>No stakeholders yet.</p>
+      <p className="text-xs">Stake tokens are minted when you withdraw funds after the campaign succeeds.</p>
     </div>
   );
 
   return (
-    <div className="p-5 bg-amber-50 border border-amber-200 rounded-xl space-y-2">
-      <p className="font-semibold text-amber-900 flex items-center gap-2">
-        🎁 Extra FDY Token Reward
-        <span className="text-xs font-normal bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Active</span>
+    <div className="space-y-3">
+      <p className="text-xs text-muted-foreground">
+        Total supply: <span className="font-semibold text-foreground">{totalStake} {tokenSymbol}</span> · Showing all {holders.length} stakeholders
       </p>
-      <p className="text-sm text-amber-800">
-        Donate <strong>{info.minDonate} ETH+</strong> and receive an extra <strong>{Number(info.amount).toLocaleString()} FDY</strong> tokens on top of the automatic reward.
-      </p>
-      <p className="text-xs text-amber-600">FDY tokens are funded by the campaign organizer and distributed automatically on-chain.</p>
+      <div className="overflow-x-auto rounded-xl border">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-muted/50 text-xs text-muted-foreground">
+              <th className="text-left px-4 py-2.5 font-semibold">#</th>
+              <th className="text-left px-4 py-2.5 font-semibold">Wallet</th>
+              <th className="text-right px-4 py-2.5 font-semibold">ETH Donated</th>
+              <th className="text-right px-4 py-2.5 font-semibold">{tokenSymbol} Balance</th>
+              <th className="text-right px-4 py-2.5 font-semibold">Stake %</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {holders.map((h, i) => (
+              <tr key={h.address} className="hover:bg-muted/20 transition-colors">
+                <td className="px-4 py-3 text-muted-foreground text-xs">{i + 1}</td>
+                <td className="px-4 py-3">
+                  <span className="font-mono text-xs">{h.address.slice(0, 8)}...{h.address.slice(-6)}</span>
+                </td>
+                <td className="px-4 py-3 text-right font-mono text-xs">⟠ {h.ethDonated}</td>
+                <td className="px-4 py-3 text-right font-semibold text-xs">{h.stakeBalance}</td>
+                <td className="px-4 py-3 text-right">
+                  <div className="flex items-center justify-end gap-2">
+                    <div className="w-16 bg-muted rounded-full h-1.5 overflow-hidden">
+                      <div className="bg-primary h-full rounded-full" style={{ width: `${Math.min(100, parseFloat(h.stakePct))}%` }} />
+                    </div>
+                    <span className="text-xs font-semibold w-12 text-right">{h.stakePct}%</span>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
+
+// ── Cancel Request Dialog ─────────────────────────────────────
 function CancelRequestDialog({
-  open,
-  onClose,
-  onSubmitted,
-  existingRequest,
+  open, onClose, onSubmitted, existingRequest,
 }: {
   open: boolean;
   onClose: () => void;
@@ -93,13 +306,13 @@ function CancelRequestDialog({
 
   if (existingRequest) {
     const statusIcon = {
-      pending: <Clock className="w-5 h-5 text-amber-500" />,
+      pending:  <Clock className="w-5 h-5 text-amber-500" />,
       approved: <CheckCircle2 className="w-5 h-5 text-emerald-500" />,
       rejected: <XCircle className="w-5 h-5 text-destructive" />,
     }[existingRequest.status];
 
     const statusColor = {
-      pending: 'bg-amber-100 text-amber-700',
+      pending:  'bg-amber-100 text-amber-700',
       approved: 'bg-emerald-100 text-emerald-700',
       rejected: 'bg-red-100 text-red-700',
     }[existingRequest.status];
@@ -108,9 +321,7 @@ function CancelRequestDialog({
       <Dialog open={open} onOpenChange={onClose}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              {statusIcon} Cancel Request Status
-            </DialogTitle>
+            <DialogTitle className="flex items-center gap-2">{statusIcon} Cancel Request Status</DialogTitle>
             <DialogDescription>Your cancel request has been submitted and is being reviewed.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 pt-2 text-sm">
@@ -131,9 +342,7 @@ function CancelRequestDialog({
               </div>
             )}
             {existingRequest.status === 'pending' && (
-              <p className="text-xs text-muted-foreground">
-                Your campaign remains active while this request is under review.
-              </p>
+              <p className="text-xs text-muted-foreground">Your campaign remains active while this request is under review.</p>
             )}
             <Button variant="outline" className="w-full" onClick={onClose}>Close</Button>
           </div>
@@ -151,14 +360,12 @@ function CancelRequestDialog({
           </DialogTitle>
           <DialogDescription>
             Your request will be reviewed by our admin team. Your campaign stays active until approved.
-            Once cancelled, <strong>ETH donations will be refundable on-chain</strong> — FDY tokens already earned are kept by donors.
+            Once cancelled, <strong>ETH donations will be refundable on-chain</strong>.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 pt-2">
           <div className="space-y-1.5">
-            <Label>
-              Reason for cancellation <span className="text-destructive">*</span>
-            </Label>
+            <Label>Reason for cancellation <span className="text-destructive">*</span></Label>
             <Textarea
               placeholder="Please explain why you want to cancel this campaign..."
               rows={4}
@@ -168,12 +375,10 @@ function CancelRequestDialog({
           </div>
           <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
             <Info className="w-4 h-4 shrink-0 mt-0.5 text-amber-600" />
-            <span>Admin will review your request and may approve or reject it. You will be notified by email.</span>
+            <span>Admin will review your request and may approve or reject it.</span>
           </div>
           <div className="flex gap-3 pt-1">
-            <Button variant="outline" className="flex-1" onClick={onClose}>
-              Back
-            </Button>
+            <Button variant="outline" className="flex-1" onClick={onClose}>Back</Button>
             <Button
               variant="destructive"
               className="flex-1"
@@ -181,7 +386,6 @@ function CancelRequestDialog({
               onClick={async () => {
                 setIsSubmitting(true);
                 try {
-                  // submitCancelRequest is called from parent which has campaignId + userId
                   onSubmitted({ reason } as any);
                 } finally {
                   setIsSubmitting(false);
@@ -209,12 +413,10 @@ export default function CampaignManage() {
   const { withdrawFunds, getCampaignOnChain, isConnected, connect } = useWeb3();
   const [activeTab, setActiveTab] = useState('overview');
 
-  // Withdrawal state
   const [isWithdrawing, setIsWithdrawing] = useState(false);
   const [onChainData, setOnChainData] = useState<any>(null);
   const [loadingOnChain, setLoadingOnChain] = useState(false);
 
-  // Update post state
   const [updateTitle, setUpdateTitle] = useState('');
   const [updateContent, setUpdateContent] = useState('');
   const [isPostingUpdate, setIsPostingUpdate] = useState(false);
@@ -223,7 +425,6 @@ export default function CampaignManage() {
   const [isUploadingMedia, setIsUploadingMedia] = useState(false);
   const [updates, setUpdates] = useState<any[]>([]);
 
-  // Edit campaign state
   const [isEditMode, setIsEditMode] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [editTitle, setEditTitle] = useState('');
@@ -232,19 +433,14 @@ export default function CampaignManage() {
   const [editEndDate, setEditEndDate] = useState('');
   const [editImageUrl, setEditImageUrl] = useState('');
 
-  // Cancel request state
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [cancelRequest, setCancelRequest] = useState<DbCancelRequest | null>(null);
   const [loadingCancelRequest, setLoadingCancelRequest] = useState(false);
 
-  // Load updates
   React.useEffect(() => {
-    if (id) {
-      getCampaignUpdates(id).then(setUpdates).catch(console.error);
-    }
+    if (id) getCampaignUpdates(id).then(setUpdates).catch(console.error);
   }, [id]);
 
-  // Pre-fill edit fields when campaign loads
   React.useEffect(() => {
     if (campaign) {
       setEditTitle(campaign.title);
@@ -255,16 +451,10 @@ export default function CampaignManage() {
     }
   }, [campaign?.id]);
 
-  // Load existing cancel request
   React.useEffect(() => {
-    if (id) {
-      fetchMyCancelRequest(id)
-        .then(setCancelRequest)
-        .catch(() => setCancelRequest(null));
-    }
+    if (id) fetchMyCancelRequest(id).then(setCancelRequest).catch(() => setCancelRequest(null));
   }, [id]);
 
-  // Fetch on-chain campaign data (balance, withdrawn flag, goal reached)
   React.useEffect(() => {
     if (!campaign?.onChainId) return;
     setLoadingOnChain(true);
@@ -276,31 +466,17 @@ export default function CampaignManage() {
 
   const handleWithdraw = async () => {
     if (!campaign?.onChainId) return;
-    if (!isConnected) {
-      toast.error('Please connect your wallet first.');
-      await connect();
-      return;
-    }
+    if (!isConnected) { toast.error('Please connect your wallet first.'); await connect(); return; }
     setIsWithdrawing(true);
     try {
       await withdrawFunds(campaign.onChainId);
       toast.success('Funds withdrawn successfully!');
-
-      // ✅ UPDATE CAMPAIGN STATUS TO 'completed' HERE
-      await updateCampaign(id!, {
-        status: 'completed'
-      });
-
-      // Refresh on-chain data
+      await updateCampaign(id!, { status: 'completed' });
       const updated = await getCampaignOnChain(campaign.onChainId);
       setOnChainData(updated);
-
-      // Optional: Show additional message
       toast.success('Campaign marked as completed!');
-
     } catch (err: any) {
-      const msg = err?.reason ?? err?.message ?? 'Withdrawal failed';
-      toast.error(msg);
+      toast.error(err?.reason ?? err?.message ?? 'Withdrawal failed');
     } finally {
       setIsWithdrawing(false);
     }
@@ -329,42 +505,25 @@ export default function CampaignManage() {
   }
 
   const handlePostUpdate = async () => {
-    if (!updateTitle.trim() || !updateContent.trim()) {
-      toast.error('Please fill in both title and content');
-      return;
-    }
+    if (!updateTitle.trim() || !updateContent.trim()) { toast.error('Please fill in both title and content'); return; }
     setIsPostingUpdate(true);
     try {
       let imageUrl: string | null = null;
       if (mediaFile) {
         setIsUploadingMedia(true);
-        try {
-          imageUrl = await uploadMedia(mediaFile, `updates/${id}`);
-        } catch {
-          toast.error('Failed to upload image. Post will be saved without it.');
-        } finally {
-          setIsUploadingMedia(false);
-        }
+        try { imageUrl = await uploadMedia(mediaFile, `updates/${id}`); }
+        catch { toast.error('Failed to upload image. Post will be saved without it.'); }
+        finally { setIsUploadingMedia(false); }
       }
       await createCampaignUpdate({
-        campaign_id: id!,
-        title: updateTitle,
-        content: updateContent,
-        author_id: user!.id,
-        author_name: user!.name,
-        image_url: imageUrl,
+        campaign_id: id!, title: updateTitle, content: updateContent,
+        author_id: user!.id, author_name: user!.name, image_url: imageUrl,
       });
       toast.success('Update posted successfully!');
-      setUpdateTitle('');
-      setUpdateContent('');
-      setMediaFile(null);
-      setMediaPreview(null);
+      setUpdateTitle(''); setUpdateContent(''); setMediaFile(null); setMediaPreview(null);
       setUpdates(await getCampaignUpdates(id!));
-    } catch {
-      toast.error('Failed to post update');
-    } finally {
-      setIsPostingUpdate(false);
-    }
+    } catch { toast.error('Failed to post update'); }
+    finally { setIsPostingUpdate(false); }
   };
 
   const handleSaveCampaign = async () => {
@@ -372,8 +531,7 @@ export default function CampaignManage() {
     setIsSaving(true);
     try {
       await updateCampaign(id!, {
-        title: editTitle.trim(),
-        short_description: editShortDesc.trim(),
+        title: editTitle.trim(), short_description: editShortDesc.trim(),
         description: editDesc.trim(),
         end_date: editEndDate ? new Date(editEndDate).toISOString() : undefined,
         image_url: editImageUrl.trim() || null,
@@ -382,9 +540,7 @@ export default function CampaignManage() {
       setIsEditMode(false);
     } catch (err: any) {
       toast.error(err.message ?? 'Failed to save changes');
-    } finally {
-      setIsSaving(false);
-    }
+    } finally { setIsSaving(false); }
   };
 
   const handleOpenCancelDialog = async () => {
@@ -392,12 +548,8 @@ export default function CampaignManage() {
     try {
       const req = await fetchMyCancelRequest(id!);
       setCancelRequest(req);
-    } catch {
-      setCancelRequest(null);
-    } finally {
-      setLoadingCancelRequest(false);
-      setShowCancelDialog(true);
-    }
+    } catch { setCancelRequest(null); }
+    finally { setLoadingCancelRequest(false); setShowCancelDialog(true); }
   };
 
   const handleCancelSubmit = async (partial: DbCancelRequest) => {
@@ -411,12 +563,18 @@ export default function CampaignManage() {
     }
   };
 
-  // Cancel request status badge
   const cancelRequestBadge = cancelRequest ? {
-    pending: <Badge className="bg-amber-100 text-amber-700 border-0 text-xs">Cancel Pending Review</Badge>,
+    pending:  <Badge className="bg-amber-100 text-amber-700 border-0 text-xs">Cancel Pending Review</Badge>,
     approved: <Badge className="bg-red-100 text-red-700 border-0 text-xs">Cancel Approved</Badge>,
     rejected: <Badge className="bg-slate-100 text-slate-600 border-0 text-xs">Cancel Rejected</Badge>,
   }[cancelRequest.status] : null;
+
+  // ✅ 正确的 goal reached 判断 — 只用 totalRaisedEth，没有 totalRaisedFdy
+  const totalRaisedEth  = onChainData ? Number(ethers.formatEther(onChainData.totalRaisedEth)) : 0;
+  const goalEth         = onChainData ? Number(ethers.formatEther(onChainData.goalAmount))     : 0;
+  const goalReached     = onChainData ? onChainData.totalRaisedEth >= onChainData.goalAmount   : false;
+  const alreadyWithdrawn = onChainData?.withdrawn ?? false;
+  const cancelled        = onChainData?.cancelled ?? false;
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-10">
@@ -436,11 +594,7 @@ export default function CampaignManage() {
         <div className="lg:col-span-1 space-y-4">
           <Card>
             <CardContent className="p-4 space-y-2">
-              <img
-                src={campaign.image}
-                alt={campaign.title}
-                className="w-full h-32 object-cover rounded-lg mb-3"
-              />
+              <img src={campaign.image} alt={campaign.title} className="w-full h-32 object-cover rounded-lg mb-3" />
               <p className="font-semibold text-sm line-clamp-2">{campaign.title}</p>
               <div className="flex justify-between text-xs text-muted-foreground">
                 <span>{campaign.currentAmount.toLocaleString()} ETH raised</span>
@@ -450,9 +604,7 @@ export default function CampaignManage() {
           </Card>
 
           <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm">Quick Stats</CardTitle>
-            </CardHeader>
+            <CardHeader className="pb-2"><CardTitle className="text-sm">Quick Stats</CardTitle></CardHeader>
             <CardContent className="space-y-2 text-sm">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Donors</span>
@@ -466,113 +618,83 @@ export default function CampaignManage() {
           </Card>
 
           {/* Withdraw Funds */}
-          {campaign.onChainId && (() => {
-            const totalRaisedEth = onChainData ? Number(ethers.formatEther(onChainData.totalRaisedEth)) : 0;
-            const goalEth = onChainData ? Number(ethers.formatEther(onChainData.goalAmount)) : 0;
-            const goalReached = onChainData ? (onChainData.totalRaisedEth + onChainData.totalRaisedFdy >= onChainData.goalAmount) : false;
-            const alreadyWithdrawn = onChainData?.withdrawn ?? false;
-            const cancelled = onChainData?.cancelled ?? false;
-
-            return (
-              <Card className="border-primary/20">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm flex items-center gap-2">
-                    <Wallet className="w-4 h-4 text-primary" /> Withdraw Funds
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {loadingOnChain ? (
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Loader2 className="w-3 h-3 animate-spin" /> Loading on-chain data...
-                    </div>
-                  ) : onChainData ? (
-                    <>
-                      <div className="space-y-1 text-xs">
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Total Raised</span>
-                          <span className="font-semibold">{totalRaisedEth.toFixed(4)} ETH</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Goal</span>
-                          <span className="font-semibold">{goalEth.toFixed(4)} ETH</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Status</span>
-                          <span className={`font-semibold ${alreadyWithdrawn ? 'text-muted-foreground' : goalReached ? 'text-emerald-600' : 'text-amber-600'}`}>
-                            {alreadyWithdrawn ? 'Withdrawn' : goalReached ? 'Ready to withdraw' : 'Goal not reached'}
-                          </span>
-                        </div>
+          {campaign.onChainId && (
+            <Card className="border-primary/20">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Wallet className="w-4 h-4 text-primary" /> Withdraw Funds
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {loadingOnChain ? (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <Loader2 className="w-3 h-3 animate-spin" /> Loading on-chain data...
+                  </div>
+                ) : onChainData ? (
+                  <>
+                    <div className="space-y-1 text-xs">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Total Raised</span>
+                        <span className="font-semibold">{totalRaisedEth.toFixed(4)} ETH</span>
                       </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Goal</span>
+                        <span className="font-semibold">{goalEth.toFixed(4)} ETH</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Status</span>
+                        <span className={`font-semibold ${alreadyWithdrawn ? 'text-muted-foreground' : goalReached ? 'text-emerald-600' : 'text-amber-600'}`}>
+                          {alreadyWithdrawn ? 'Withdrawn' : goalReached ? 'Ready to withdraw' : 'Goal not reached'}
+                        </span>
+                      </div>
+                    </div>
 
-                      {!alreadyWithdrawn && !cancelled && goalReached && (
-                        <Button
-                          size="sm"
-                          className="w-full"
-                          onClick={handleWithdraw}
-                          disabled={isWithdrawing}
-                        >
-                          {isWithdrawing
-                            ? <><Loader2 className="w-3 h-3 animate-spin mr-2" /> Withdrawing...</>
-                            : <><Wallet className="w-3 h-3 mr-2" /> Withdraw Funds</>}
-                        </Button>
-                      )}
+                    {!alreadyWithdrawn && !cancelled && goalReached && (
+                      <Button size="sm" className="w-full" onClick={handleWithdraw} disabled={isWithdrawing}>
+                        {isWithdrawing
+                          ? <><Loader2 className="w-3 h-3 animate-spin mr-2" /> Withdrawing...</>
+                          : <><Wallet className="w-3 h-3 mr-2" /> Withdraw Funds</>}
+                      </Button>
+                    )}
 
-                      {!alreadyWithdrawn && !cancelled && !goalReached && (
-                        <div className="flex items-start gap-2 p-2 bg-amber-50 border border-amber-200 rounded-lg text-[10px] text-amber-700">
-                          <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5 text-amber-500" />
-                          Goal not yet reached. Withdrawal will be available once the goal is met.
-                        </div>
-                      )}
+                    {!alreadyWithdrawn && !cancelled && !goalReached && (
+                      <div className="flex items-start gap-2 p-2 bg-amber-50 border border-amber-200 rounded-lg text-[10px] text-amber-700">
+                        <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5 text-amber-500" />
+                        Goal not yet reached. Withdrawal available once the goal is met.
+                      </div>
+                    )}
 
-                      {alreadyWithdrawn && (
-                        <div className="flex items-center gap-2 p-2 bg-muted/40 rounded-lg text-[10px] text-muted-foreground">
-                          <CheckCircle2 className="w-3 h-3 text-emerald-500" />
-                          Funds have been successfully withdrawn.
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    <p className="text-[10px] text-muted-foreground">Unable to load on-chain data.</p>
-                  )}
-                </CardContent>
-              </Card>
-            );
-          })()}
+                    {alreadyWithdrawn && (
+                      <div className="flex items-center gap-2 p-2 bg-muted/40 rounded-lg text-[10px] text-muted-foreground">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-500" />
+                        Funds have been successfully withdrawn.
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-[10px] text-muted-foreground">Unable to load on-chain data.</p>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
-          {/* Cancel button — submits a request, not an immediate cancel */}
+          {/* Cancel */}
           <Card className="border-destructive/20">
             <CardContent className="p-4">
               {cancelRequest?.status === 'pending' ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full text-amber-600 border-amber-300"
-                  onClick={handleOpenCancelDialog}
-                >
-                  <Clock className="w-3 h-3 mr-2" />
-                  View Cancel Request
+                <Button variant="outline" size="sm" className="w-full text-amber-600 border-amber-300" onClick={handleOpenCancelDialog}>
+                  <Clock className="w-3 h-3 mr-2" /> View Cancel Request
                 </Button>
               ) : cancelRequest?.status === 'approved' ? (
-                <p className="text-xs text-center text-destructive font-medium">
-                  This campaign has been cancelled.
-                </p>
+                <p className="text-xs text-center text-destructive font-medium">This campaign has been cancelled.</p>
               ) : (
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  className="w-full"
-                  onClick={handleOpenCancelDialog}
-                  disabled={campaign.status !== 'active' || loadingCancelRequest}
-                >
-                  {loadingCancelRequest
-                    ? <Loader2 className="w-3 h-3 animate-spin mr-2" />
-                    : <Trash2 className="w-3 h-3 mr-2" />}
+                <Button variant="destructive" size="sm" className="w-full" onClick={handleOpenCancelDialog}
+                  disabled={campaign.status !== 'active' || loadingCancelRequest}>
+                  {loadingCancelRequest ? <Loader2 className="w-3 h-3 animate-spin mr-2" /> : <Trash2 className="w-3 h-3 mr-2" />}
                   Request Cancellation
                 </Button>
               )}
-              <p className="text-[10px] text-muted-foreground text-center mt-2">
-                Cancellation requires admin approval
-              </p>
+              <p className="text-[10px] text-muted-foreground text-center mt-2">Cancellation requires admin approval</p>
             </CardContent>
           </Card>
         </div>
@@ -580,16 +702,11 @@ export default function CampaignManage() {
         {/* Main Content */}
         <div className="lg:col-span-3">
           <Tabs defaultValue="overview" value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="grid w-full grid-cols-3">
-              <TabsTrigger value="overview" className="gap-2">
-                <TrendingUp className="w-4 h-4" /> Overview
-              </TabsTrigger>
-              <TabsTrigger value="updates" className="gap-2">
-                <MessageCircle className="w-4 h-4" /> Post Update
-              </TabsTrigger>
-              <TabsTrigger value="rewards" className="gap-2">
-                <Gift className="w-4 h-4" /> Rewards
-              </TabsTrigger>
+            <TabsList className="grid w-full grid-cols-4">
+              <TabsTrigger value="overview" className="gap-2"><TrendingUp className="w-4 h-4" /> Overview</TabsTrigger>
+              <TabsTrigger value="updates" className="gap-2"><MessageCircle className="w-4 h-4" /> Post Update</TabsTrigger>
+              <TabsTrigger value="rewards" className="gap-2"><Gift className="w-4 h-4" /> Rewards</TabsTrigger>
+              <TabsTrigger value="stakeholders" className="gap-2"><Wallet className="w-4 h-4" /> Stakeholders</TabsTrigger>
             </TabsList>
 
             {/* Overview Tab */}
@@ -718,7 +835,7 @@ export default function CampaignManage() {
                   </div>
                   <div className="space-y-2">
                     <Label>Update Content</Label>
-                    <Textarea placeholder="Share the latest news about your campaign..." rows={6} value={updateContent} onChange={(e) => setUpdateContent(e.target.value)} />
+                    <Textarea placeholder="Share the latest news..." rows={6} value={updateContent} onChange={(e) => setUpdateContent(e.target.value)} />
                   </div>
                   <div className="space-y-2">
                     <Label>Add Image (Optional)</Label>
@@ -770,24 +887,22 @@ export default function CampaignManage() {
 
             {/* Rewards Tab */}
             <TabsContent value="rewards" className="space-y-6">
-              {/* FDY Rewards */}
               <Card>
                 <CardHeader>
                   <CardTitle>Token Rewards</CardTitle>
-                  <CardDescription>FDY token rewards automatically given to donors</CardDescription>
+                  <CardDescription>Stake token rewards automatically distributed to donors on withdrawal</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {/* Always-on FDY reward */}
                   <div className="p-5 bg-blue-50 border border-blue-200 rounded-xl">
                     <p className="font-semibold text-blue-800 flex items-center gap-2 mb-1">
-                      🪙 Automatic FDY Token Reward <span className="text-xs font-normal bg-blue-100 px-2 py-0.5 rounded-full">Always active</span>
+                      🪙 Automatic Stake Token Reward
+                      <span className="text-xs font-normal bg-blue-100 px-2 py-0.5 rounded-full">Always active</span>
                     </p>
                     <p className="text-sm text-blue-700">
-                      Every donor automatically receives FDY tokens — <strong>1 ETH donated = 100 FDY</strong>. FDY can be used to donate on Fundy.
+                      Every donor automatically receives this campaign's unique stake token — <strong>1 ETH donated = 100 tokens</strong>.
+                      Tokens are minted when you withdraw and are freely transferable on any platform.
                     </p>
                   </div>
-
-                  {/* Extra FDY reward — read from on-chain */}
                   {campaign.onChainId ? (
                     <ExtraFdyRewardCard onChainId={campaign.onChainId} />
                   ) : (
@@ -800,11 +915,30 @@ export default function CampaignManage() {
               </Card>
             </TabsContent>
 
+            {/* Stakeholders Tab */}
+            <TabsContent value="stakeholders" className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Stakeholder List</CardTitle>
+                  <CardDescription>
+                    On-chain stake token holders for this campaign, sorted by largest stake.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {campaign.onChainId ? (
+                    <StakeholdersPanel onChainId={campaign.onChainId} />
+                  ) : (
+                    <div className="text-center py-10 text-muted-foreground text-sm">
+                      <p>Campaign not yet registered on-chain.</p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
           </Tabs>
         </div>
       </div>
 
-      {/* Cancel Request Dialog */}
       <CancelRequestDialog
         open={showCancelDialog}
         onClose={() => setShowCancelDialog(false)}

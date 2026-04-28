@@ -18,7 +18,6 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   ImageIcon, Loader2, ArrowLeft, Info, ShieldCheck, ShieldAlert, Sparkles,
-  Trash2, Coins, ChevronDown, ChevronUp,
 } from 'lucide-react';
 
 // ─── Constants ────────────────────────────────────────────────
@@ -47,131 +46,18 @@ function slugify(text: string) {
   return text.toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-').trim().slice(0, 80);
 }
 
-// ─── Single tier editor ───────────────────────────────────────
-function TierEditor({ tier, index, onUpdate, onRemove }: {
-  tier: RewardTier; index: number;
-  onUpdate: (t: RewardTier) => void;
-  onRemove: () => void;
-}) {
-  const [open, setOpen] = useState(true);
-  const meta = REWARD_TYPE_META[tier.type];
-  const Icon = meta.icon;
-  const set = <K extends keyof RewardTier>(key: K, val: RewardTier[K]) => onUpdate({ ...tier, [key]: val });
-
-  return (
-    <motion.div layout initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.97 }}
-      className="border border-border rounded-2xl overflow-hidden bg-card"
-    >
-      {/* Header */}
-      <div className="flex items-center gap-3 px-5 py-4 cursor-pointer select-none hover:bg-muted/30 transition-colors"
-        onClick={() => setOpen((o) => !o)}
-      >
-        <div className={`p-2 rounded-lg border ${meta.color}`}><Icon className="w-4 h-4" /></div>
-        <div className="flex-1 min-w-0">
-          <p className="font-semibold text-sm truncate">{tier.name || `Reward tier ${index + 1}`}</p>
-          <p className="text-xs text-muted-foreground">Donate ≥ {tier.minAmount} ETH · {meta.label}</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button type="button" variant="ghost" size="icon" className="text-destructive hover:text-destructive h-7 w-7"
-            onClick={(e) => { e.stopPropagation(); onRemove(); }}>
-            <Trash2 className="w-3.5 h-3.5" />
-          </Button>
-          {open ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
-        </div>
-      </div>
-
-      {/* Body */}
-      <AnimatePresence initial={false}>
-        {open && (
-          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2 }} className="overflow-hidden"
-          >
-            <div className="px-5 pb-5 pt-2 space-y-4 border-t border-border bg-muted/10">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <Label className="text-xs">Minimum donation (ETH)</Label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-mono text-sm">⟠ </span>
-                    <Input type="number" min={1} className="pl-7 font-mono"
-                      value={tier.minAmount}
-                      onChange={(e) => set('minAmount', Number(e.target.value))} />
-                  </div>
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs">Reward type</Label>
-                  <Select value={tier.type} onValueChange={(v) => set('type', v as RewardType)}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {(Object.keys(REWARD_TYPE_META) as RewardType[]).map((t) => (
-                        <SelectItem key={t} value={t}>
-                          <div className="flex items-center gap-2">
-                            {React.createElement(REWARD_TYPE_META[t].icon, { className: 'w-3.5 h-3.5' })}
-                            {REWARD_TYPE_META[t].label}
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-[10px] text-muted-foreground">{meta.desc}</p>
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-xs">Reward name</Label>
-                <Input
-                  placeholder={
-                    tier.type === 'ERC721' ? 'e.g. Pioneer Supporter NFT'
-                      : tier.type === 'ERC20' ? 'e.g. FUNDY Token Reward'
-                        : tier.type === 'physical' ? 'e.g. Signed Poster, T-Shirt'
-                          : 'e.g. Early Bird Badge'
-                  }
-                  value={tier.name} onChange={(e) => set('name', e.target.value)} />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-xs">Reward description</Label>
-                <textarea
-                  className="w-full min-h-[72px] bg-background border border-input rounded-lg p-3 text-sm focus:ring-2 focus:ring-primary focus:outline-none resize-none"
-                  placeholder="Describe what donors receive and why it's meaningful..."
-                  value={tier.description} onChange={(e) => set('description', e.target.value)} />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {tier.type === 'ERC20' && (
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Token amount to distribute</Label>
-                    <Input type="number" min={1} placeholder="e.g. 100"
-                      value={tier.tokenAmount ?? ''}
-                      onChange={(e) => set('tokenAmount', e.target.value ? Number(e.target.value) : null)} />
-                  </div>
-                )}
-                <div className="space-y-1.5">
-                  <Label className="text-xs">Limited edition quantity (leave blank = unlimited)</Label>
-                  <Input type="number" min={1} placeholder="e.g. 500"
-                    value={tier.quantity ?? ''}
-                    onChange={(e) => set('quantity', e.target.value ? Number(e.target.value) : null)} />
-                </div>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </motion.div>
-  );
-}
-
 // ─── Main page ────────────────────────────────────────────────
 export default function CreateCampaign() {
   const navigate = useNavigate();
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
-  const { isConnected, connect, createCampaignOnChain, approveExtraFdy, buyFdy, checkFdyBalance } = useWeb3();
+  const { isConnected, connect, createCampaignOnChain } = useWeb3();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [previewUrl, setPreviewUrl] = useState('');
 
-  // ── On-chain reward config ────────────────────────────────
-  const [extraFdyAmount, setExtraFdyAmount] = useState('');
-  const [extraFdyMinRm, setExtraFdyMinRm] = useState('');
-  const [extraFdyBudget, setExtraFdyBudget] = useState('');
+  // ── Extra reward config (new: quantity/minDonate/fdyAmount) ──
+  const [extraQuantity, setExtraQuantity]     = useState('');   // max 99
+  const [extraMinDonate, setExtraMinDonate]   = useState('');   // min ETH (≥1)
+  const [extraFdyAmount, setExtraFdyAmount]   = useState('');   // tokens per donor
   const [showRewardConfig, setShowRewardConfig] = useState(false);
 
   const form = useForm<FormValues>({
@@ -229,35 +115,34 @@ export default function CreateCampaign() {
       if (!res.ok) throw new Error('Failed to create campaign');
       const [campaign] = await res.json();
 
-      // Extra FDY 
-      if (extraFdyAmount && extraFdyBudget) {
-        try {
-          toast.info('Checking FDY balance...');
-          const hasSufficientFdy = await checkFdyBalance(extraFdyBudget);
-          if (!hasSufficientFdy) {
-            const ethNeeded = (Number(extraFdyBudget) / 100).toFixed(6);
-            toast.info(`Insufficient FDY — purchasing ${extraFdyBudget} FDY (costs ${ethNeeded} ETH)...`);
-            await buyFdy(ethNeeded);
-            toast.success('FDY purchased!');
-          }
-          toast.info('Step 1/2: Approving FDY budget...');
-          await approveExtraFdy(extraFdyBudget);
-          toast.success('FDY approved!');
-        } catch (e: any) {
-          if (e?.code === 4001) { toast.error('Transaction cancelled.'); setIsSubmitting(false); return; }
-          toast.warning('FDY setup failed — extra token reward disabled.');
-        }
+      // Extra reward validation
+      const hasExtra = !!(extraQuantity && extraFdyAmount && extraMinDonate);
+      if (hasExtra) {
+        const q = Number(extraQuantity);
+        const min = Number(extraMinDonate);
+        const fdy = Number(extraFdyAmount);
+        if (q < 1 || q > 99) { toast.error('Extra reward quantity must be 1–99'); setIsSubmitting(false); return; }
+        if (min < 1) { toast.error('Minimum donation must be at least 1 ETH'); setIsSubmitting(false); return; }
+        if (fdy < 1 || fdy > 10000) { toast.error('Extra FDY amount must be 1–10,000'); setIsSubmitting(false); return; }
       }
 
       // Register into the chain
       let onChainId: number | null = null;
       try {
-        toast.info(extraFdyAmount ? 'Step 2/2: Registering campaign on-chain...' : 'Confirm in MetaMask...');
-        const goalEth = values.goal_amount.toFixed(6);
+        toast.info('Confirm in MetaMask...');
+        const goalEth   = values.goal_amount.toFixed(6);
         const deadlineTs = Math.floor(new Date(values.end_date).getTime() / 1000);
-        const extraFdyWei = extraFdyAmount || '0';
-        const extraMinEth = extraFdyMinRm ? Number(extraFdyMinRm).toFixed(6) : '0';
-        onChainId = await createCampaignOnChain(campaign.id, goalEth, deadlineTs, '', extraFdyWei, extraMinEth);
+
+        // New signature: createCampaignOnChain(supabaseId, goalEth, deadlineTs, title, extraQuantity, extraFdyAmount, extraMinDonate)
+        onChainId = await createCampaignOnChain(
+          campaign.id,
+          goalEth,
+          deadlineTs,
+          values.title,
+          hasExtra ? String(extraQuantity) : '0',
+          hasExtra ? String(extraFdyAmount) : '0',
+          hasExtra ? String(extraMinDonate) : '0',
+        );
 
         // update on_chain_id
         await dbFetch(`campaigns?id=eq.${campaign.id}`, 'PATCH', { on_chain_id: onChainId });
@@ -459,52 +344,61 @@ export default function CreateCampaign() {
                 {/* Always-on: FDY base reward explanation */}
                 <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl text-sm space-y-1">
                   <p className="font-semibold text-blue-800 flex items-center gap-2">
-                    🪙 Automatic FDY Token Reward <span className="text-xs font-normal">(always active)</span>
+                    🪙 Automatic Stake Token Reward <span className="text-xs font-normal">(always active)</span>
                   </p>
                   <p className="text-blue-700 text-xs">
-                    Every donor automatically receives FDY tokens: <strong>1 ETH donated = 100 FDY</strong>.
-                    FDY can only be used to donate on Fundy — it cannot be transferred outside the platform.
+                    Every donor automatically receives this campaign's stake token (FDY-XXXX): <strong>1 ETH donated = 100 tokens</strong>.
+                    Tokens are minted at withdrawal and are freely transferable — tradeable on any platform.
                   </p>
                 </div>
 
                 {showRewardConfig && (
                   <div className="space-y-5">
-                    {/* Extra FDY reward */}
+                    {/* Extra reward */}
                     <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl space-y-3">
                       <p className="font-semibold text-amber-900 flex items-center gap-2">
-                        🎁 Extra FDY Token Reward <span className="text-xs font-normal text-amber-700">(optional)</span>
+                        🎁 Extra Stake Token Reward <span className="text-xs font-normal text-amber-700">(optional)</span>
                       </p>
                       <p className="text-xs text-amber-800">
-                        Offer <em>extra</em> FDY tokens from your own wallet for qualifying donations.
-                        <br />
-                        ⚠️ <strong>Cost to you:</strong> These FDY tokens are deducted from YOUR wallet balance.
-                        You must set a total budget and approve it before the campaign registers on-chain.
+                        The first qualifying donors get bonus stake tokens, minted automatically when you withdraw.
+                        The ETH cost is deducted from your payout (cost = slots × tokens ÷ 100).
+                        Each donor can only receive this once.
                       </p>
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div className="space-y-1">
-                          <label className="text-xs font-semibold text-amber-900">Extra FDY per donation</label>
-                          <input type="number" min="0" placeholder="e.g. 500"
-                            value={extraFdyAmount} onChange={e => setExtraFdyAmount(e.target.value)}
+                          <label className="text-xs font-semibold text-amber-900">
+                            Number of slots <span className="font-normal text-amber-600">(max 99)</span>
+                          </label>
+                          <input type="number" min="1" max="99" placeholder="e.g. 20"
+                            value={extraQuantity} onChange={e => setExtraQuantity(e.target.value)}
                             className="w-full px-3 py-2 text-sm border border-amber-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white" />
-                          <p className="text-[10px] text-amber-700">FDY tokens per qualifying donation</p>
+                          <p className="text-[10px] text-amber-700">Max donors who get extra tokens</p>
                         </div>
                         <div className="space-y-1">
-                          <label className="text-xs font-semibold text-amber-900">Min donation (ETH)</label>
-                          <input type="number" min="0" placeholder="e.g. 20"
-                            value={extraFdyMinRm} onChange={e => setExtraFdyMinRm(e.target.value)}
+                          <label className="text-xs font-semibold text-amber-900">
+                            Min donation (ETH) <span className="font-normal text-amber-600">(≥ 1 ETH)</span>
+                          </label>
+                          <input type="number" min="1" step="0.1" placeholder="e.g. 5"
+                            value={extraMinDonate} onChange={e => setExtraMinDonate(e.target.value)}
                             className="w-full px-3 py-2 text-sm border border-amber-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white" />
                           <p className="text-[10px] text-amber-700">Minimum ETH to qualify</p>
                         </div>
                         <div className="space-y-1">
-                          <label className="text-xs font-semibold text-amber-900">Total FDY budget</label>
-                          <input type="number" min="0" placeholder="e.g. 10"
-                            value={extraFdyBudget} onChange={e => setExtraFdyBudget(e.target.value)}
+                          <label className="text-xs font-semibold text-amber-900">
+                            Tokens per donor <span className="font-normal text-amber-600">(max 10,000)</span>
+                          </label>
+                          <input type="number" min="1" max="10000" placeholder="e.g. 200"
+                            value={extraFdyAmount} onChange={e => setExtraFdyAmount(e.target.value)}
                             className="w-full px-3 py-2 text-sm border border-amber-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white" />
-                          <p className="text-[10px] text-amber-700">Max total FDY you will spend</p>
+                          <p className="text-[10px] text-amber-700">Stake tokens per qualifying donor</p>
                         </div>
                       </div>
+                      {extraQuantity && extraFdyAmount && extraMinDonate && (
+                        <div className="p-3 bg-amber-100 rounded-lg text-xs text-amber-900">
+                          <strong>Estimated cost:</strong> {Number(extraQuantity)} slots × {Number(extraFdyAmount)} tokens ÷ 100 = <strong>{((Number(extraQuantity) * Number(extraFdyAmount)) / 100).toFixed(4)} ETH</strong> deducted from your withdrawal.
+                        </div>
+                      )}
                     </div>
-
                   </div>
                 )}
               </div>
