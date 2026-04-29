@@ -1,0 +1,26 @@
+{
+  "name": "BatchTransfer",
+  "address": "0x8bd1aa336bac450c7b15dfa63d2cfae65978e22b",
+  "abi": [
+    {
+      "inputs": [
+        {
+          "internalType": "address[]",
+          "name": "recipients",
+          "type": "address[]"
+        },
+        {
+          "internalType": "uint256[]",
+          "name": "values",
+          "type": "uint256[]"
+        }
+      ],
+      "name": "disperseEther",
+      "outputs": [],
+      "stateMutability": "payable",
+      "type": "function"
+    }
+  ],
+  "filePath": "electron/contracts/BatchTransfer.sol",
+  "pinnedAt": 1777396991422
+}

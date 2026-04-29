@@ -1,0 +1,65 @@
+{
+	"compiler": {
+		"version": "0.8.30+commit.73712a01"
+	},
+	"language": "Solidity",
+	"output": {
+		"abi": [
+			{
+				"inputs": [
+					{
+						"internalType": "address[]",
+						"name": "recipients",
+						"type": "address[]"
+					},
+					{
+						"internalType": "uint256[]",
+						"name": "values",
+						"type": "uint256[]"
+					}
+				],
+				"name": "disperseEther",
+				"outputs": [],
+				"stateMutability": "payable",
+				"type": "function"
+			}
+		],
+		"devdoc": {
+			"kind": "dev",
+			"methods": {},
+			"version": 1
+		},
+		"userdoc": {
+			"kind": "user",
+			"methods": {},
+			"version": 1
+		}
+	},
+	"settings": {
+		"compilationTarget": {
+			"contracts/BatchTransfer.sol": "BatchTransfer"
+		},
+		"evmVersion": "london",
+		"libraries": {},
+		"metadata": {
+			"bytecodeHash": "ipfs"
+		},
+		"optimizer": {
+			"enabled": true,
+			"runs": 200
+		},
+		"remappings": [],
+		"viaIR": true
+	},
+	"sources": {
+		"contracts/BatchTransfer.sol": {
+			"keccak256": "0x70fc7c568fe08dddea78b31dc8f3d8a2506646966c6f9d10b11f157099b7039f",
+			"license": "MIT",
+			"urls": [
+				"bzz-raw://964c8d1f8435997ec9485ec4160af57e8fceeaf818f0543e5cb077b53335e2a8",
+				"dweb:/ipfs/Qmbb9VSY5mPRJkZxr1Xfvv4F4WjQpaZMhZy4dVn2cEZh5K"
+			]
+		}
+	},
+	"version": 1
+}
