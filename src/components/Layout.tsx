@@ -247,28 +247,6 @@ export function Layout({ children }: LayoutProps) {
 
           {/* Desktop Actions */}
           <div className="hidden md:flex items-center gap-3">
-            {/* Language Switcher */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="sm" className="gap-2">
-                  <span className="text-lg">{currentLanguage.flag}</span>
-                  <span className="uppercase text-xs font-bold">{currentLanguage.code}</span>
-                  <ChevronDown className="w-3 h-3 text-muted-foreground" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-40">
-                {languages.map((lang) => (
-                  <DropdownMenuItem
-                    key={lang.code}
-                    onClick={() => setLanguage(lang.code as LanguageCode)}
-                    className="flex items-center gap-3 cursor-pointer"
-                  >
-                    <span className="text-lg">{lang.flag}</span>
-                    <span className="font-medium">{lang.name}</span>
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
 
             {/* Auth */}
             {isAuthenticated ? (
