@@ -38,7 +38,7 @@ remain:
 for the testing expired run below code
 node scripts/simulate-expiry.mjs <campaign-id(get from supabase)>
 example only dont use:
-node scripts/simulate-expiry.mjs 5bd0aaf0-c818-4a3a-ac97-f26f4632b562
+node scripts/simulate-expiry.mjs e10f8a17-b653-4b8b-a3d3-124aa89e839f
 
-node scripts/reset-campaign.mjs ad1e0d1e-e574-4414-817f-84a5881ccf34 
+node scripts/reset-campaign.mjs e10f8a17-b653-4b8b-a3d3-124aa89e839f
 
