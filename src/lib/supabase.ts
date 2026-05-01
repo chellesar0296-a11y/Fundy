@@ -264,13 +264,29 @@ export async function createCampaignUpdate(data: {
   author_name: string;
   image_url?: string | null;
 }) {
+  console.log('Creating campaign update with data:', { ...data, image_url: data.image_url || 'null' });
+
   const { data: update, error } = await supabase
     .from('campaign_updates')
-    .insert([{ ...data, created_at: new Date().toISOString() }])
+    .insert({
+      campaign_id: data.campaign_id,
+      title: data.title,
+      content: data.content,
+      author_id: data.author_id,
+      author_name: data.author_name,
+      image_url: data.image_url || null,
+      // ❌ REMOVE THIS LINE:
+      // created_at: new Date().toISOString(),
+    })
     .select()
     .single();
 
-  if (error) throw error;
+  if (error) {
+    console.error('Supabase error details:', error);
+    throw new Error(`Failed to create update: ${error.message}`);
+  }
+
+  console.log('Update created successfully:', update);
   return update;
 }
 
@@ -284,31 +300,60 @@ export async function createCampaignUpdate(data: {
  * @returns Public URL of the uploaded file
  */
 export async function uploadMedia(file: File, folder: string): Promise<string> {
+  console.log('Starting uploadMedia...', { fileName: file.name, fileSize: file.size, folder });
+
+  if (file.size > 5 * 1024 * 1024) {
+    throw new Error('File size must be under 5MB');
+  }
+
+  const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+  if (!validTypes.includes(file.type)) {
+    throw new Error('Only JPEG, PNG, GIF, and WEBP images are allowed');
+  }
+
   const ext = file.name.split('.').pop();
-  const filename = `${folder}/${Date.now()}.${ext}`;
+  const filename = `${folder}/${Date.now()}-${Math.random().toString(36).substring(7)}.${ext}`;
 
-  const { error } = await supabase.storage
+  console.log('Uploading to path:', filename);
+
+  // JUST THIS - no Promise.race
+  const { data, error } = await supabase.storage
     .from('campaign-media')
-    .upload(filename, file, { upsert: true });
+    .upload(filename, file, {
+      cacheControl: '3600',
+      upsert: false,
+      contentType: file.type,
+    });
 
-  if (error) throw error;
+  if (error) {
+    console.error('Upload error:', error);
+    throw new Error(`Upload failed: ${error.message}`);
+  }
 
-  const { data } = supabase.storage
+  const { data: { publicUrl } } = supabase.storage
     .from('campaign-media')
     .getPublicUrl(filename);
 
-  return data.publicUrl;
+  console.log('Public URL:', publicUrl);
+  return publicUrl;
 }
 
 export async function getCampaignUpdates(campaignId: string) {
+  console.log('Fetching updates for campaign:', campaignId);
+
   const { data, error } = await supabase
     .from('campaign_updates')
     .select('*')
     .eq('campaign_id', campaignId)
     .order('created_at', { ascending: false });
 
-  if (error) throw error;
-  return data;
+  if (error) {
+    console.error('Error fetching updates:', error);
+    throw error;
+  }
+
+  console.log(`Fetched ${data?.length || 0} updates`);
+  return data || [];
 }
 
 export async function cancelCampaign(campaignId: string) {

@@ -30,7 +30,7 @@ import {
   fetchMyCancelRequest,
   DbCancelRequest,
 } from '@/lib/supabase';
-
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from '@/lib/supabase';
 // ── Extra Stake Token Reward Card ─────────────────────────────
 function ExtraFdyRewardCard({ onChainId }: { onChainId: number }) {
   const { provider } = useWeb3();
@@ -47,21 +47,21 @@ function ExtraFdyRewardCard({ onChainId }: { onChainId: number }) {
 
   React.useEffect(() => {
     if (!provider || !onChainId) return;
-    
+
     let cancelled = false;
     setLoading(true);
-    
+
     (async () => {
       try {
         const contract = new ethers.Contract(CONTRACT_ADDRESSES.crowdfunding, CROWDFUNDING_ABI, provider);
-        
+
         const [campaign, extra] = await Promise.all([
           contract.getCampaign(onChainId),
           contract.getExtraRewardInfo(onChainId),
         ]);
-        
+
         const extraQuantity = Number(extra.quantity);
-        
+
         if (!extra.hasExtra || extraQuantity === 0) {
           if (!cancelled) {
             setInfo({
@@ -77,10 +77,10 @@ function ExtraFdyRewardCard({ onChainId }: { onChainId: number }) {
           }
           return;
         }
-        
+
         const donorsList = await contract.getDonors(onChainId);
         const minDonateWei = extra.minDonate;
-        
+
         const qualifiedDonors = await Promise.all(
           donorsList.map(async (donor: string) => {
             const donationWei = await contract.getEthDonation(onChainId, donor);
@@ -90,10 +90,10 @@ function ExtraFdyRewardCard({ onChainId }: { onChainId: number }) {
             return donationWei >= minDonateWei || alreadyAwarded;
           })
         );
-        
+
         const slotsTaken = qualifiedDonors.filter(Boolean).length;
         const slotsRemaining = Math.max(0, extraQuantity - slotsTaken);
-        
+
         if (!cancelled) {
           setInfo({
             hasExtra: extra.hasExtra,
@@ -111,7 +111,7 @@ function ExtraFdyRewardCard({ onChainId }: { onChainId: number }) {
         if (!cancelled) setLoading(false);
       }
     })();
-    
+
     return () => { cancelled = true; };
   }, [provider, onChainId]);
 
@@ -149,13 +149,13 @@ function ExtraFdyRewardCard({ onChainId }: { onChainId: number }) {
           ? 'All extra reward slots have been claimed.'
           : `${info.slotsRemaining} of ${info.quantity} slots remaining (${info.slotsTaken} claimed)`}
       </p>
-      
+
       {!isSoldOut && info.slotsTaken > 0 && (
         <p className="text-[10px] text-amber-600">
           ✅ {info.slotsTaken} donor{info.slotsTaken !== 1 ? 's' : ''} qualified
         </p>
       )}
-      
+
       <p className="text-[10px] text-muted-foreground mt-2">
         ⚠️ Extra rewards are minted when the organizer withdraws funds after campaign completion.
       </p>
@@ -433,7 +433,7 @@ function StakeholdersPanel({ onChainId }: { onChainId: number }) {
                 try {
                   const donated = await contract.getEthDonation(onChainId, addr);
                   ethAmt = Number(ethers.formatEther(donated)).toFixed(4);
-                } catch {}
+                } catch { }
               }
               return {
                 address: addr,
@@ -564,13 +564,13 @@ function CancelRequestDialog({
 
   if (existingRequest) {
     const statusIcon = {
-      pending:  <Clock className="w-5 h-5 text-amber-500" />,
+      pending: <Clock className="w-5 h-5 text-amber-500" />,
       approved: <CheckCircle2 className="w-5 h-5 text-emerald-500" />,
       rejected: <XCircle className="w-5 h-5 text-destructive" />,
     }[existingRequest.status];
 
     const statusColor = {
-      pending:  'bg-amber-100 text-amber-700',
+      pending: 'bg-amber-100 text-amber-700',
       approved: 'bg-emerald-100 text-emerald-700',
       rejected: 'bg-red-100 text-red-700',
     }[existingRequest.status];
@@ -763,27 +763,89 @@ export default function CampaignManage() {
   }
 
   const handlePostUpdate = async () => {
-    if (!updateTitle.trim() || !updateContent.trim()) { toast.error('Please fill in both title and content'); return; }
+    if (!updateTitle.trim() || !updateContent.trim()) {
+      toast.error('Please fill in both title and content');
+      return;
+    }
+
+    if (!user?.id) {
+      toast.error('You must be logged in to post updates');
+      return;
+    }
+
     setIsPostingUpdate(true);
+
     try {
       let imageUrl: string | null = null;
+
       if (mediaFile) {
         setIsUploadingMedia(true);
-        try { imageUrl = await uploadMedia(mediaFile, `updates/${id}`); }
-        catch { toast.error('Failed to upload image. Post will be saved without it.'); }
-        finally { setIsUploadingMedia(false); }
+        try {
+          imageUrl = await uploadMedia(mediaFile, `updates/${id}`);
+          toast.success('Image uploaded successfully');
+        } catch (uploadError: any) {
+          console.error('Upload error:', uploadError);
+          toast.warning(`Image upload failed: ${uploadError.message}`);
+          setMediaFile(null);
+          setMediaPreview(null);
+          imageUrl = null;
+        } finally {
+          setIsUploadingMedia(false);
+        }
       }
-      await createCampaignUpdate({
-        campaign_id: id!, title: updateTitle, content: updateContent,
-        author_id: user!.id, author_name: user!.name, image_url: imageUrl,
-      });
-      toast.success('Update posted successfully!');
-      setUpdateTitle(''); setUpdateContent(''); setMediaFile(null); setMediaPreview(null);
-      setUpdates(await getCampaignUpdates(id!));
-    } catch { toast.error('Failed to post update'); }
-    finally { setIsPostingUpdate(false); }
-  };
 
+      // USE DIRECT FETCH INSTEAD OF SUPABASE CLIENT
+      console.log('Using direct fetch...');
+
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/campaign_updates`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          'Prefer': 'return=representation'
+        },
+        body: JSON.stringify({
+          campaign_id: id!,
+          title: updateTitle,
+          content: updateContent,
+          author_id: user!.id,
+          author_name: user!.name,
+          image_url: imageUrl,
+          created_at: new Date().toISOString()
+        })
+      });
+
+      console.log('Response status:', response.status);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Error response:', errorText);
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+
+      const result = await response.json();
+      console.log('Update created:', result);
+
+      toast.success('Update posted successfully!');
+
+      // Reset form
+      setUpdateTitle('');
+      setUpdateContent('');
+      setMediaFile(null);
+      setMediaPreview(null);
+
+      // Refresh updates list
+      const freshUpdates = await getCampaignUpdates(id!);
+      setUpdates(freshUpdates);
+
+    } catch (error: any) {
+      console.error('Post update error details:', error);
+      toast.error(error.message || 'Failed to post update. Please try again.');
+    } finally {
+      setIsPostingUpdate(false);
+    }
+  };
   const handleSaveCampaign = async () => {
     if (!editTitle.trim()) { toast.error('Title cannot be empty'); return; }
     setIsSaving(true);
@@ -822,16 +884,16 @@ export default function CampaignManage() {
   };
 
   const cancelRequestBadge = cancelRequest ? {
-    pending:  <Badge className="bg-amber-100 text-amber-700 border-0 text-xs">Cancel Pending Review</Badge>,
+    pending: <Badge className="bg-amber-100 text-amber-700 border-0 text-xs">Cancel Pending Review</Badge>,
     approved: <Badge className="bg-red-100 text-red-700 border-0 text-xs">Cancel Approved</Badge>,
     rejected: <Badge className="bg-slate-100 text-slate-600 border-0 text-xs">Cancel Rejected</Badge>,
   }[cancelRequest.status] : null;
 
-  const totalRaisedEth  = onChainData ? Number(ethers.formatEther(onChainData.totalRaisedEth)) : 0;
-  const goalEth         = onChainData ? Number(ethers.formatEther(onChainData.goalAmount))     : 0;
-  const goalReached     = onChainData ? onChainData.totalRaisedEth >= onChainData.goalAmount   : false;
+  const totalRaisedEth = onChainData ? Number(ethers.formatEther(onChainData.totalRaisedEth)) : 0;
+  const goalEth = onChainData ? Number(ethers.formatEther(onChainData.goalAmount)) : 0;
+  const goalReached = onChainData ? onChainData.totalRaisedEth >= onChainData.goalAmount : false;
   const alreadyWithdrawn = onChainData?.withdrawn ?? false;
-  const cancelled        = onChainData?.cancelled ?? false;
+  const cancelled = onChainData?.cancelled ?? false;
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-10">
